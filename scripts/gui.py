@@ -396,20 +396,23 @@ class IIIGui():
         self.cable_takeoff_target_cable_distance_entry.grid(row=0, column=1)
 
         # Open gripper:
+        self.gripper_frame = tkinter.Frame(self.root, bg="white")
+        self.gripper_frame.grid(row=1, column=1, pady=10)
+
         self.open_gripper_button = tkinter.Button(
-            self.action_control_frame,
+            self.gripper_frame,
             text="Open gripper",
             command=self.execute_open_gripper
         )
-        self.open_gripper_button.grid(row=9, column=0, pady=10)
+        self.open_gripper_button.grid(row=0, column=0, pady=10)
 
         # Close gripper:
         self.close_gripper_button = tkinter.Button(
-            self.action_control_frame,
+            self.gripper_frame,
             text="Close gripper",
             command=self.execute_close_gripper
         )
-        self.close_gripper_button.grid(row=10, column=0, pady=10)
+        self.close_gripper_button.grid(row=1, column=0, pady=10)
 
         # Update actions:
         self.update_available_actions()

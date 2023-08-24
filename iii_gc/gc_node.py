@@ -17,11 +17,11 @@ from tf2_ros.transform_listener import TransformListener
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
-from std_msgs.msg import Int16
+from std_msgs.msg import Int16, Float32
 
 ###############################################################################
 # Custom interfaces:
-from iii_interfaces.msg import Powerline, ControlState, GripperStatus
+from iii_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus 
 from iii_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
 from iii_interfaces.srv import GripperCommand
 
@@ -76,6 +76,10 @@ class IIIGCNode(Node):
         self.action_status_lock_ = Lock()
         self.target_lock_ = Lock()
         self.traj_lock_ = Lock()
+        self.battery_voltage_lock_ = Lock()
+        self.charging_power_lock_ = Lock()
+        self.charger_operating_mode_lock_ = Lock()
+        self.charger_status_lock_ = Lock()
         self.gripper_status_lock_ = Lock()
         self.target_cable_id_lock_ = Lock()
 
@@ -88,6 +92,15 @@ class IIIGCNode(Node):
         self.target = None
         self.traj = None
         self.target_cable_id_ = None
+
+        self.battery_voltage_ = -1
+        self.charging_power_ = -1
+
+        self.charger_operating_mode_ = ChargerOperatingMode()
+        self.charger_operating_mode_.operating_mode = 0
+
+        self.charger_status_ = ChargerStatus()
+        self.charger_status_.charger_status = 0
 
         self.gripper_status_ = GripperStatus()
         self.gripper_status_.gripper_status = GripperStatus.GRIPPER_STATUS_OPEN
@@ -138,6 +151,34 @@ class IIIGCNode(Node):
             Path,
             "/trajectory_controller/planned_trajectory",
             self.on_planned_trajectory_msg,
+            qos_profile=qos
+        )
+
+        self.battery_voltage_sub_ = self.create_subscription(
+            Float32,
+            "/charger_gripper/battery_voltage",
+            self.on_battery_voltage_msg,
+            qos_profile=qos
+        )
+
+        self.charging_power_sub_ = self.create_subscription(
+            Float32,
+            "/charger_gripper/charging_power",
+            self.on_charging_power_msg,
+            qos_profile=qos
+        )
+
+        self.charger_operating_mode_sub_ = self.create_subscription(
+            ChargerOperatingMode,
+            "/charger_gripper/charger_operating_mode",
+            self.on_charger_operating_mode_msg,
+            qos_profile=qos
+        )
+
+        self.charger_status_sub_ = self.create_subscription(
+            ChargerStatus,
+            "/charger_gripper/charger_status",
+            self.on_charger_status_msg,
             qos_profile=qos
         )
 
@@ -234,6 +275,26 @@ class IIIGCNode(Node):
             self.traj = msg
             self.traj_lock_.release()
 
+    def on_battery_voltage_msg(self, msg: Float32):
+        if self.battery_voltage_lock_.acquire(blocking=True):
+            self.battery_voltage_ = msg.data
+            self.battery_voltage_lock_.release()
+
+    def on_charging_power_msg(self, msg: Float32):
+        if self.charging_power_lock_.acquire(blocking=True):
+            self.charging_power_ = msg.data
+            self.charging_power_lock_.release()
+
+    def on_charger_operating_mode_msg(self, msg: ChargerOperatingMode):
+        if self.charger_operating_mode_lock_.acquire(blocking=True):
+            self.charger_operating_mode_ = msg
+            self.charger_operating_mode_lock_.release()
+
+    def on_charger_status_msg(self, msg: ChargerStatus):
+        if self.charger_status_lock_.acquire(blocking=True):
+            self.charger_status_ = msg
+            self.charger_status_lock_.release()
+
     def on_gripper_status_msg(self, msg: GripperStatus):
         if self.gripper_status_lock_.acquire(blocking=True):
             self.gripper_status_ = msg
@@ -244,6 +305,30 @@ class IIIGCNode(Node):
             id = self.target_cable_id_
             self.target_cable_id_lock_.release()
             return id
+
+    def get_battery_voltage(self):
+        if self.battery_voltage_lock_.acquire(blocking=True):
+            voltage = self.battery_voltage_
+            self.battery_voltage_lock_.release()
+            return voltage
+        
+    def get_charging_power(self):
+        if self.charging_power_lock_.acquire(blocking=True):
+            power = self.charging_power_
+            self.charging_power_lock_.release()
+            return power
+        
+    def get_charger_operating_mode(self):
+        if self.charger_operating_mode_lock_.acquire(blocking=True):
+            mode = self.charger_operating_mode_
+            self.charger_operating_mode_lock_.release()
+            return mode
+        
+    def get_charger_status(self):
+        if self.charger_status_lock_.acquire(blocking=True):
+            status = self.charger_status_
+            self.charger_status_lock_.release()
+            return status
 
     def get_gripper_status(self) -> GripperStatus:
         if self.gripper_status_lock_.acquire(blocking=True):

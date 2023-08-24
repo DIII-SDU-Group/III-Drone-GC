@@ -21,7 +21,7 @@ from iii_gc.gc_node import IIIGCNode
 
 ###############################################################################
 # Custom interfaces:
-from iii_interfaces.msg import GripperStatus
+from iii_interfaces.msg import GripperStatus, ChargerOperatingMode, ChargerStatus
 
 ###############################################################################
 # Libraries:
@@ -45,6 +45,13 @@ import subprocess
 ###############################################################################
 # Class
 ###############################################################################
+
+normal_button_bg = "#FFFFFF"
+normal_button_fg = "#000000"
+disabled_button_fg = "#808080"
+
+buttons_font = ("Arial", 20, "bold")
+text_font = ("Arial", 20, "bold")
 
 class IIIGui():
     def __init__(self):
@@ -104,13 +111,15 @@ class IIIGui():
         self.control_state_label = tkinter.Label(
             self.diagnostics_frame, 
             text="Trajectory controller state:",
-            background="white"
+            background="white",
+            font=text_font
         )
         self.control_state_label.grid(row=0, column=0)
         self.control_state_value_label = tkinter.Label(
             self.diagnostics_frame,
             text=self.node.get_control_state(),
-            background="cyan"
+            background="cyan",
+            font=text_font
         )
         self.control_state_value_label.grid(row=0, column=1)
 
@@ -119,39 +128,116 @@ class IIIGui():
         self.target_cable_id_label = tkinter.Label(
             self.diagnostics_frame,
             text="Target cable ID:",
-            background="white"
+            background="white",
+            font=text_font
         )
         self.target_cable_id_label.grid(row=1, column=0)
 
         self.target_cable_id_value_label = tkinter.Label(
             self.diagnostics_frame,
             text=str(self.target_cable_id),
-            background="cyan"
+            background="cyan",
+            font=text_font
         )
         self.target_cable_id_value_label.grid(row=1, column=1)
 
         self.put_target_cable_id()
 
+        self.battery_voltage_label = tkinter.Label(
+            self.diagnostics_frame,
+            text="Battery voltage:",
+            background="white",
+            font=text_font
+        )
+        self.battery_voltage_label.grid(row=2, column=0)
+
+        self.battery_voltage_value_label = tkinter.Label(
+            self.diagnostics_frame,
+            text=str(self.node.get_battery_voltage()),
+            background="cyan",
+            font=text_font
+        )
+        self.battery_voltage_value_label.grid(row=2, column=1)
+
+        self.put_battery_voltage()
+
+        self.charging_power_label = tkinter.Label(
+            self.diagnostics_frame,
+            text="Charging power:",
+            background="white",
+            font=text_font
+        )
+        self.charging_power_label.grid(row=3, column=0)
+
+        self.charging_power_value_label = tkinter.Label(
+            self.diagnostics_frame,
+            text=str(self.node.get_charging_power()),
+            background="cyan",
+            font=text_font
+        )
+        self.charging_power_value_label.grid(row=3, column=1)
+
+        self.put_charging_power()
+
+        self.charger_operating_mode_label = tkinter.Label(
+            self.diagnostics_frame,
+            text="Charger operating mode:",
+            background="white",
+            font=text_font
+        )
+        self.charger_operating_mode_label.grid(row=4, column=0)
+
+        self.charger_operating_mode_value_label = tkinter.Label(
+            self.diagnostics_frame,
+            text="",
+            background="cyan",
+            font=text_font
+        )
+        self.charger_operating_mode_value_label.grid(row=4, column=1)
+
+        self.put_charger_operating_mode()
+
+        self.charger_status_label = tkinter.Label(
+            self.diagnostics_frame,
+            text="Charger status:",
+            background="white",
+            font=text_font
+        )
+        self.charger_status_label.grid(row=5, column=0)
+
+        self.charger_status_value_label = tkinter.Label(
+            self.diagnostics_frame,
+            text="",
+            background="cyan",
+            font=text_font
+        )
+        self.charger_status_value_label.grid(row=5, column=1)
+
+        self.put_charger_status()
+
+
         self.gripper_status_label = tkinter.Label(
             self.diagnostics_frame,
             text="Gripper status:",
-            background="white"
+            background="white",
+            font=text_font
         )
-        self.gripper_status_label.grid(row=2, column=0)
+        self.gripper_status_label.grid(row=6, column=0)
 
         gripper_status = "open" if self.node.get_gripper_status().gripper_status == GripperStatus.GRIPPER_STATUS_OPEN else "closed"
 
         self.gripper_status_value_label = tkinter.Label(
             self.diagnostics_frame,
             text=gripper_status,
-            background="cyan"
+            background="cyan",
+            font=text_font
         )
-        self.gripper_status_value_label.grid(row=2, column=1)
+        self.gripper_status_value_label.grid(row=6, column=1)
 
         self.put_gripper_status()
 
         # Action control:
-        self.action_control_frame = tkinter.Frame(self.root, bg="white")
+        self.action_control_frame = tkinter.Frame(self.root, bg="#000000")
         self.action_control_frame.grid(row=1, column=0)
 
         self.cancel_action_frame = tkinter.Frame(self.action_control_frame, bg="yellow")
@@ -162,40 +248,45 @@ class IIIGui():
             text="Cancel action",
             command=self.cancel_action,
             bg="red",
-            fg="black"
+            fg="black",
+            font=buttons_font,
         )
         self.cancel_action_button.grid(row=0, column=0, pady=10)
 
         self.set_cancel_button_state()
 
-        self.action_diagnostics_frame = tkinter.Frame(self.action_control_frame, bg="white")
+        self.action_diagnostics_frame = tkinter.Frame(self.action_control_frame, bg="#000000")
         self.action_diagnostics_frame.grid(row=0, column=1)
 
         self.current_action_label = tkinter.Label(
             self.action_diagnostics_frame, 
             text="Current action:",
-            bg="white"
+            bg="white",
+            font=text_font
         )
         self.current_action_label.grid(row=0, column=0)
 
         self.current_action_value_label = tkinter.Label(
             self.action_diagnostics_frame,
             text=self.current_action,
-            bg="cyan"
+            bg="cyan",
+            font=text_font
         )
         self.current_action_value_label.grid(row=0, column=1)
 
         self.action_status_label = tkinter.Label(
             self.action_diagnostics_frame, 
             text="Action status:",
-            bg="white"
+            bg="white",
+            font=text_font
         )
         self.action_status_label.grid(row=1, column=0)
 
         self.action_status_value_label = tkinter.Label(
             self.action_diagnostics_frame,
             text=self.action_status,
-            bg="cyan"
+            bg="cyan",
+            font=text_font
         )
         self.action_status_value_label.grid(row=1, column=1)
 
@@ -205,23 +296,29 @@ class IIIGui():
         self.takeoff_button = tkinter.Button(
             self.action_control_frame,
             text="Takeoff",
-            command=self.execute_takeoff
+            command=self.execute_takeoff,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
         self.takeoff_button.grid(row=1, column=0, pady=10)
 
-        self.takeoff_parameters_frame = tkinter.Frame(self.action_control_frame, bg="white")
+        self.takeoff_parameters_frame = tkinter.Frame(self.action_control_frame, bg="#000000")
         self.takeoff_parameters_frame.grid(row=1, column=1)
 
         self.takeoff_height_label = tkinter.Label(
             self.takeoff_parameters_frame,
-            text="Height: "
+            text="Height: ",
+            font=text_font
         )
         self.takeoff_height_label.grid(row=0, column=0)
 
         self.takeoff_height_entry = tkinter.Entry(
             self.takeoff_parameters_frame,
             validate="key",
-            validatecommand=self.vcmd_numeric
+            validatecommand=self.vcmd_numeric,
+            font=text_font
         )
         self.takeoff_height_entry.insert(0, str(self.takeoff_height))
         self.takeoff_height_entry.grid(row=0, column=1)
@@ -230,7 +327,11 @@ class IIIGui():
         self.land_button = tkinter.Button(
             self.action_control_frame,
             text="Land",
-            command=self.execute_landing
+            command=self.execute_landing,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
         self.land_button.grid(row=2, column=0, pady=10)
 
@@ -238,65 +339,77 @@ class IIIGui():
         self.fly_to_position_button = tkinter.Button(
             self.action_control_frame,
             text="Fly to position",
-            command=self.execute_fly_to_position
+            command=self.execute_fly_to_position,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
         self.fly_to_position_button.grid(row=3, column=0, pady=10)
 
-        self.fly_to_position_parameters_frame = tkinter.Frame(self.action_control_frame, bg="white")
+        self.fly_to_position_parameters_frame = tkinter.Frame(self.action_control_frame, bg="#000000")
         self.fly_to_position_parameters_frame.grid(row=3, column=1, pady=10)
 
         self.fly_to_position_x_label = tkinter.Label(
             self.fly_to_position_parameters_frame,
-            text="X: "
+            text="X: ",
+            font=text_font
         )
         self.fly_to_position_x_label.grid(row=0, column=0)
 
         self.fly_to_position_x_entry = tkinter.Entry(
             self.fly_to_position_parameters_frame,
             validate="key",
-            validatecommand=self.vcmd_numeric
+            validatecommand=self.vcmd_numeric,
+            font=text_font
         )
         self.fly_to_position_x_entry.insert(0, str(1))
         self.fly_to_position_x_entry.grid(row=0, column=1)
 
         self.fly_to_position_y_label = tkinter.Label(
             self.fly_to_position_parameters_frame,
-            text="Y: "
+            text="Y: ",
+            font=text_font
         )
         self.fly_to_position_y_label.grid(row=1, column=0)
 
         self.fly_to_position_y_entry = tkinter.Entry(
             self.fly_to_position_parameters_frame,
             validate="key",
-            validatecommand=self.vcmd_numeric
+            validatecommand=self.vcmd_numeric,
+            font=text_font
         )
         self.fly_to_position_y_entry.insert(0, str(0))
         self.fly_to_position_y_entry.grid(row=1, column=1)
 
         self.fly_to_position_z_label = tkinter.Label(
             self.fly_to_position_parameters_frame,
-            text="Z: "
+            text="Z: ",
+            font=text_font
         )
         self.fly_to_position_z_label.grid(row=2, column=0)
 
         self.fly_to_position_z_entry = tkinter.Entry(
             self.fly_to_position_parameters_frame,
             validate="key",
-            validatecommand=self.vcmd_numeric
+            validatecommand=self.vcmd_numeric,
+            font=text_font
         )
         self.fly_to_position_z_entry.insert(0, str(0))
         self.fly_to_position_z_entry.grid(row=2, column=1)
 
         self.fly_to_position_yaw_label = tkinter.Label(
             self.fly_to_position_parameters_frame,
-            text="Yaw: "
+            text="Yaw: ",
+            font=text_font
         )
         self.fly_to_position_yaw_label.grid(row=3, column=0)
 
         self.fly_to_position_yaw_entry = tkinter.Entry(
             self.fly_to_position_parameters_frame,
             validate="key",
-            validatecommand=self.vcmd_numeric
+            validatecommand=self.vcmd_numeric,
+            font=text_font
         )
         self.fly_to_position_yaw_entry.insert(0, str(0))
         self.fly_to_position_yaw_entry.grid(row=3, column=1)
@@ -305,16 +418,21 @@ class IIIGui():
         self.fly_under_cable_button = tkinter.Button(
             self.action_control_frame,
             text="Fly under cable",
-            command=self.execute_fly_under_cable
+            command=self.execute_fly_under_cable,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
         self.fly_under_cable_button.grid(row=4, column=0, pady=10)
 
-        self.fly_under_cable_parameters_frame = tkinter.Frame(self.action_control_frame, bg="white")
+        self.fly_under_cable_parameters_frame = tkinter.Frame(self.action_control_frame, bg="#000000")
         self.fly_under_cable_parameters_frame.grid(row=4, column=1, pady=10)
 
         self.fly_under_cable_target_cable_id_label = tkinter.Label(
             self.fly_under_cable_parameters_frame,
-            text="Fly under cable target cable ID: "
+            text="Fly under cable target cable ID: ",
+            font=text_font
         )
         self.fly_under_cable_target_cable_id_label.grid(row=0, column=0)
 
@@ -324,21 +442,26 @@ class IIIGui():
         self.fly_under_cable_target_cable_id_optionmenu = tkinter.OptionMenu(
             self.fly_under_cable_parameters_frame,
             self.fly_under_cable_target_cable_id_stringvar,
-            tuple(*self.cable_ids) if len(self.cable_ids) > 0 else ("")
+            tuple(*self.cable_ids) if len(self.cable_ids) > 0 else (""),
         )
+        self.fly_under_cable_target_cable_id_optionmenu.config(font=text_font)
+        self.fly_under_cable_target_cable_id_optionmenu_menu = self.root.nametowidget(self.fly_under_cable_target_cable_id_optionmenu.menuname)
+        self.fly_under_cable_target_cable_id_optionmenu_menu.config(font=text_font)
         self.update_target_cable_id_optionmenu()
         self.fly_under_cable_target_cable_id_optionmenu.grid(row=0, column=1)
 
         self.fly_under_cable_target_cable_distance_label = tkinter.Label(
             self.fly_under_cable_parameters_frame,
-            text="Fly under cable target cable distance: "
+            text="Fly under cable target cable distance: ",
+            font=text_font
         )
         self.fly_under_cable_target_cable_distance_label.grid(row=1, column=0)
 
         self.fly_under_cable_target_cable_distance_entry = tkinter.Entry(
             self.fly_under_cable_parameters_frame,
             validate="key",
-            validatecommand=self.vcmd_numeric
+            validatecommand=self.vcmd_numeric,
+            font=text_font
         )
         self.fly_under_cable_target_cable_distance_entry.insert(0, str(self.target_cable_distance))
         self.fly_under_cable_target_cable_distance_entry.grid(row=1, column=1)
@@ -347,7 +470,11 @@ class IIIGui():
         self.cable_landing_button = tkinter.Button(
             self.action_control_frame,
             text="Land on cable",
-            command=self.execute_cable_landing
+            command=self.execute_cable_landing,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
 
         self.cable_landing_button.grid(row=5, column=0, pady=10)
@@ -356,7 +483,11 @@ class IIIGui():
         self.disarm_on_cable_button = tkinter.Button(
             self.action_control_frame,
             text="Disarm on cable",
-            command=self.execute_disarm_on_cable
+            command=self.execute_disarm_on_cable,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
 
         self.disarm_on_cable_button.grid(row=6, column=0, pady=10)
@@ -365,7 +496,11 @@ class IIIGui():
         self.arm_on_cable_button = tkinter.Button(
             self.action_control_frame,
             text="Arm on cable",
-            command=self.execute_arm_on_cable
+            command=self.execute_arm_on_cable,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
 
         self.arm_on_cable_button.grid(row=7, column=0, pady=10)
@@ -374,23 +509,29 @@ class IIIGui():
         self.cable_takeoff_button = tkinter.Button(
             self.action_control_frame,
             text="Takeoff from cable",
-            command=self.execute_cable_takeoff
+            command=self.execute_cable_takeoff,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
         self.cable_takeoff_button.grid(row=8, column=0, pady=10)
 
-        self.cable_takeoff_parameters_frame = tkinter.Frame(self.action_control_frame, bg="white")
+        self.cable_takeoff_parameters_frame = tkinter.Frame(self.action_control_frame, bg="#000000")
         self.cable_takeoff_parameters_frame.grid(row=8, column=1, pady=10)
 
         self.cable_takeoff_target_cable_distance_label = tkinter.Label(
             self.cable_takeoff_parameters_frame,
-            text="Cable takeoff target cable distance: "
+            text="Cable takeoff target cable distance: ",
+            font=text_font
         )
         self.cable_takeoff_target_cable_distance_label.grid(row=0, column=0)
 
         self.cable_takeoff_target_cable_distance_entry = tkinter.Entry(
             self.cable_takeoff_parameters_frame,
             validate="key",
-            validatecommand=self.vcmd_numeric
+            validatecommand=self.vcmd_numeric,
+            font=text_font
         )
         self.cable_takeoff_target_cable_distance_entry.insert(0, str(self.target_cable_distance))
         self.cable_takeoff_target_cable_distance_entry.grid(row=0, column=1)
@@ -402,7 +543,11 @@ class IIIGui():
         self.open_gripper_button = tkinter.Button(
             self.gripper_frame,
             text="Open gripper",
-            command=self.execute_open_gripper
+            command=self.execute_open_gripper,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
         self.open_gripper_button.grid(row=0, column=0, pady=10)
 
@@ -410,113 +555,16 @@ class IIIGui():
         self.close_gripper_button = tkinter.Button(
             self.gripper_frame,
             text="Close gripper",
-            command=self.execute_close_gripper
+            command=self.execute_close_gripper,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            disabledforeground=disabled_button_fg,
+            font=buttons_font,
         )
         self.close_gripper_button.grid(row=1, column=0, pady=10)
 
         # Update actions:
         self.update_available_actions()
-
-
-        # self.action_options_window = None
-        # self.params_options_window = None
-
-        # self.pl_viz_frame = tkinter.Frame(self.root, bg="white")
-        # self.action_ctrl_frame = tkinter.Frame(self.root, bg="white")
-        # self.status_monitor_frame = tkinter.Frame(self.root, bg="white")
-        # self.action_options_frame = None
-        # self.params_frame = tkinter.Frame(self.root, bg="white")
-        # self.params_options_frame = None
-
-        # self.label_viz = tkinter.Label(self.pl_viz_frame)
-
-        # self.actions = [
-        #     "Takeoff",
-        #     "Landing",
-        #     "FlyToPosition",
-        #     "FlyUnderCable",
-        #     "CableLanding",
-        #     "CableTakeoff",
-        #     "FlyAlongCable",
-        #     "DoubleCableLanding",
-        # ]
-
-        # self.action_stringvar = tkinter.StringVar(self.root)
-        # self.action_stringvar.set(self.actions[0])
-        # self.action_optionmenu = tkinter.OptionMenu(
-        #     self.action_ctrl_frame,
-        #     self.action_stringvar,
-        #     *self.actions
-        # )
-
-        # self.execute_action_button = tkinter.Button(
-        #     self.action_ctrl_frame,
-        #     text="Execute action",
-        #     command=self.execute_action
-        # )
-        # self.cancel_action_button = tkinter.Button(
-        #     self.action_ctrl_frame,
-        #     text="Cancel action",
-        #     command=self.cancel_action
-        # )
-
-        # self.control_state_label = tkinter.Label(
-        #     self.status_monitor_frame, 
-        #     text="Trajectory controller state: "+self.node.get_control_state()
-        # )
-        # self.current_action_label = tkinter.Label(
-        #     self.status_monitor_frame, 
-        #     text=""
-        # )
-        # self.action_status_label = tkinter.Label(
-        #     self.status_monitor_frame, 
-        #     text=""
-        # )
-
-        # self.param_label = tkinter.Label(
-        #     self.params_frame, 
-        #     text="Param options:"
-        # )
-
-        # self.param_stringvar = tkinter.StringVar(self.root)
-        # self.param_stringvar.set(self.config_node_keys[0])
-        # self.param_optionmenu = tkinter.OptionMenu(
-        #     self.params_frame,
-        #     self.param_stringvar,
-        #     *self.config_node_keys
-        # )
-
-        # self.set_params_button = tkinter.Button(
-        #     self.params_frame,
-        #     text="Set params",
-        #     command=self.set_params
-        # )
-
-        # self.pl_viz_frame.grid()
-        # self.action_ctrl_frame.grid()
-        # self.status_monitor_frame.grid()
-        # self.params_frame.grid()
-
-        # self.label_viz.grid()
-
-        # self.action_optionmenu.grid()
-        # self.execute_action_button.grid()
-        # self.cancel_action_button.grid()
-
-        # self.control_state_label.grid()
-        # self.current_action_label.grid()
-        # self.action_status_label.grid()
-
-        # self.param_label.grid()
-        # self.param_optionmenu.grid()
-        # self.set_params_button.grid()
-
-        # self.set_execute_button_state()
-        # self.set_cancel_button_state()
-        # self.put_img()
-        # self.put_control_state()
-        # self.put_action_status()
-        # self.root.mainloop()
 
     def update_available_actions(self):
         control_state = self.node.get_control_state()
@@ -860,7 +908,8 @@ class IIIGui():
 
         value_label = tkinter.Label(
             self.params_options_frame,
-            text="Parameter value:"
+            text="Parameter value:",
+            font=text_font
         )
         value_entry = tkinter.Entry(
             self.params_options_frame
@@ -904,13 +953,15 @@ class IIIGui():
         ok_btn = tkinter.Button(
             self.params_options_frame,
             text="OK",
-            command=on_ok_btn_click
+            command=on_ok_btn_click,
+            font=buttons_font,
         )
 
         cancel_btn = tkinter.Button(
             self.params_options_frame,
             text="Cancel",
-            command=on_cancel_btn_click
+            command=on_cancel_btn_click,
+            font=buttons_font,
         )
 
         ok_btn.grid()
@@ -937,11 +988,13 @@ class IIIGui():
         if (action == "Takeoff"):
             takeoff_label = tkinter.Label(
                 self.action_options_frame,
-                text="Takeoff options"
+                text="Takeoff options",
+            font=text_font
             )
             takeoff_height_label = tkinter.Label(
                 self.action_options_frame,
-                text="Takeoff height:"
+                text="Takeoff height:",
+            font=text_font
             )
             takeoff_height_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -986,7 +1039,8 @@ class IIIGui():
         if action == "Landing":
             landing_label = tkinter.Label(
                 self.action_options_frame,
-                text="Landing options"
+                text="Landing options",
+            font=text_font
             )
 
             def on_ok_btn_click():
@@ -1015,11 +1069,13 @@ class IIIGui():
         elif action == "FlyToPosition":
             ftp_label = tkinter.Label(
                 self.action_options_frame,
-                text="FlyToPosition options"
+                text="FlyToPosition options",
+            font=text_font
             )
             x_label = tkinter.Label(
                 self.action_options_frame,
-                text="Position x:"
+                text="Position x:",
+            font=text_font
             )
             x_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -1028,7 +1084,8 @@ class IIIGui():
             )
             y_label = tkinter.Label(
                 self.action_options_frame,
-                text="Position y:"
+                text="Position y:",
+            font=text_font
             )
             y_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -1037,7 +1094,8 @@ class IIIGui():
             )
             z_label = tkinter.Label(
                 self.action_options_frame,
-                text="Position z:"
+                text="Position z:",
+            font=text_font
             )
             z_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -1046,7 +1104,8 @@ class IIIGui():
             )
             yaw_label = tkinter.Label(
                 self.action_options_frame,
-                text="Yaw:"
+                text="Yaw:",
+            font=text_font
             )
             yaw_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -1055,7 +1114,8 @@ class IIIGui():
             )
             frame_label = tkinter.Label(
                 self.action_options_frame,
-                text="Target position frame:"
+                text="Target position frame:",
+            font=text_font
             )
             frames = [
                 self.node.get_parameter("world_frame_id").value,
@@ -1154,11 +1214,13 @@ class IIIGui():
         elif action == "FlyUnderCable":
             fuc_label = tkinter.Label(
                 self.action_options_frame,
-                text="FlyUnderCable options"
+                text="FlyUnderCable options",
+            font=text_font
             )
             id_label = tkinter.Label(
                 self.action_options_frame,
-                text="Cable ID:"
+                text="Cable ID:",
+            font=text_font
             )
             cable_ids = self.node.get_cable_ids()
             cable_id_stringvar = tkinter.StringVar(self.action_options_window)
@@ -1170,7 +1232,8 @@ class IIIGui():
             )
             distance_label = tkinter.Label(
                 self.action_options_frame,
-                text="Target cable distance:"
+                text="Target cable distance:",
+            font=text_font
             )
             distance_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -1231,11 +1294,13 @@ class IIIGui():
         elif action == "CableLanding":
             cl_label = tkinter.Label(
                 self.action_options_frame,
-                text="CableLanding options"
+                text="CableLanding options",
+            font=text_font
             )
             id_label = tkinter.Label(
                 self.action_options_frame,
-                text="Cable ID:"
+                text="Cable ID:",
+            font=text_font
             )
             cable_ids = self.node.get_cable_ids()
             cable_id_stringvar = tkinter.StringVar(self.action_options_window)
@@ -1288,11 +1353,13 @@ class IIIGui():
         elif action == "CableTakeoff":
             ct_label = tkinter.Label(
                 self.action_options_frame,
-                text="CableTakeoff options"
+                text="CableTakeoff options",
+            font=text_font
             )
             distance_label = tkinter.Label(
                 self.action_options_frame,
-                text="Target cable distance:"
+                text="Target cable distance:",
+            font=text_font
             )
             distance_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -1342,11 +1409,13 @@ class IIIGui():
         elif action == "FlyAlongCable":
             fac_label = tkinter.Label(
                 self.action_options_frame,
-                text="FlyAlongCable options"
+                text="FlyAlongCable options",
+            font=text_font
             )
             dist_label = tkinter.Label(
                 self.action_options_frame,
-                text="Flight distance:"
+                text="Flight distance:",
+            font=text_font
             )
             dist_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -1355,7 +1424,8 @@ class IIIGui():
             )
             vel_label = tkinter.Label(
                 self.action_options_frame,
-                text="Flight velocity:"
+                text="Flight velocity:",
+            font=text_font
             )
             vel_entry = tkinter.Entry(
                 self.action_options_frame,
@@ -1364,7 +1434,8 @@ class IIIGui():
             )
             inv_label = tkinter.Label(
                 self.action_options_frame,
-                text="Invert flight direction:"
+                text="Invert flight direction:",
+            font=text_font
             )
             inv_dir = tkinter.BooleanVar(self.action_options_window)
             inv_cb = tkinter.Checkbutton(
@@ -1433,14 +1504,16 @@ class IIIGui():
         elif action == "DoubleCableLanding":
             cl_label = tkinter.Label(
                 self.action_options_frame,
-                text="DoubleCableLanding options"
+                text="DoubleCableLanding options",
+            font=text_font
             )
 
             cable_ids = self.node.get_cable_ids()
 
             first_id_label = tkinter.Label(
                 self.action_options_frame,
-                text="First cable ID:"
+                text="First cable ID:",
+            font=text_font
             )
             first_cable_id_stringvar = tkinter.StringVar(self.action_options_window)
             first_cable_id_stringvar.set(cable_ids[0])
@@ -1452,7 +1525,8 @@ class IIIGui():
 
             second_id_label = tkinter.Label(
                 self.action_options_frame,
-                text="Second cable ID:"
+                text="Second cable ID:",
+            font=text_font
             )
             second_cable_id_stringvar = tkinter.StringVar(self.action_options_window)
             second_cable_id_stringvar.set(cable_ids[0])
@@ -1567,6 +1641,64 @@ class IIIGui():
         self.target_cable_id_value_label.configure(text=str(cable_id))
 
         self.target_cable_id_value_label.after(100, self.put_target_cable_id)
+
+    def put_battery_voltage(self):
+        voltage = self.node.get_battery_voltage()
+
+        self.battery_voltage_value_label.configure(text=str(voltage))
+
+        self.battery_voltage_value_label.after(100, self.put_battery_voltage)
+
+    def put_charging_power(self):
+        power = self.node.get_charging_power()
+
+        self.charging_power_value_label.configure(text=str(power))
+
+        self.charging_power_value_label.after(100, self.put_charging_power)
+
+    def put_charger_operating_mode(self):
+        mode = self.node.get_charger_operating_mode()
+
+        text = "Unknown"
+
+        if mode == ChargerOperatingMode.OPERATING_MODE_1:
+            text = "Mode 1"
+        elif mode == ChargerOperatingMode.OPERATING_MODE_2:
+            text = "Mode 2"
+        elif mode == ChargerOperatingMode.OPERATING_MODE_3:
+            text = "Mode 3"
+        elif mode == ChargerOperatingMode.OPERATING_MODE_4:
+            text = "Mode 4"
+        elif mode == ChargerOperatingMode.OPERATING_MODE_5:
+            text = "Mode 5"
+        elif mode == ChargerOperatingMode.OPERATING_MODE_6:
+            text = "Mode 6"
+        elif mode == ChargerOperatingMode.OPERATING_MODE_7:
+            text = "Mode 7"
+        elif mode == ChargerOperatingMode.OPERATING_MODE_8:
+            text = "Mode 8"
+        elif mode == ChargerOperatingMode.OPERATING_MODE_OPEN:
+            text = "Open"
+
+        self.charger_operating_mode_value_label.configure(text=text)
+
+        self.charger_operating_mode_value_label.after(100, self.put_charger_operating_mode)
+
+    def put_charger_status(self):
+        status = self.node.get_charger_status()
+
+        text = "Unknown"
+
+        if status == ChargerStatus.CHARGER_STATUS_CHARGING:
+            text = "Charging"
+        elif status == ChargerStatus.CHARGER_STATUS_DISABLED:
+            text = "Disabled"
+        elif status == ChargerStatus.CHARGER_STATUS_FULLY_CHARGED:
+            text = "Fully charged"
+
+        self.charger_status_value_label.configure(text=text)
+
+        self.charger_status_value_label.after(100, self.put_charger_status)
 
     def put_gripper_status(self):
         status = "open" if self.node.get_gripper_status().gripper_status == GripperStatus.GRIPPER_STATUS_OPEN else "closed"

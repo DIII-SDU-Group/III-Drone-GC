@@ -276,7 +276,10 @@ class IIIGCNode(Node):
             if self.target is not None:
                 drone_frame_id = self.get_parameter("drone_frame_id").value
                 world_frame_id = self.get_parameter("world_frame_id").value
-                tf = self.tf_buffer.lookup_transform(drone_frame_id, world_frame_id, rclpy.time.Time())
+                try:
+                    tf = self.tf_buffer.lookup_transform(drone_frame_id, world_frame_id, rclpy.time.Time())
+                except Exception:
+                    return None
 
                 quat = np.array([tf.transform.rotation.w, tf.transform.rotation.x, tf.transform.rotation.y, tf.transform.rotation.z])
                 trans = np.array([tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z])

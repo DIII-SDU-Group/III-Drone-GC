@@ -23,7 +23,7 @@ from std_msgs.msg import Int16, Float32
 # Custom interfaces:
 from iii_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus 
 from iii_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
-from iii_interfaces.srv import GripperCommand
+from iii_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging
 
 ###############################################################################
 # Custom modules:
@@ -115,6 +115,10 @@ class IIIGCNode(Node):
         self.arm_on_cable_client = ActionClient(self, ArmOnCable, "/trajectory_controller/arm_on_cable",feedback_sub_qos_profile=qos)
 
         self.gripper_command_srv_client = self.create_client(GripperCommand, "/charger_gripper/gripper_command")
+
+        self.set_target_cable_id_srv_client = self.create_client(SetTargetCableId, "/continuous_mission_orchestrator/set_target_cable_id")
+        self.initiate_charging_srv_client = self.create_client(InitiateCharging, "/continuous_mission_orchestrator/initiate_charging")
+        self.interrupt_charging_srv_client = self.create_client(InterruptCharging, "/continuous_mission_orchestrator/interrupt_charging")
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -661,6 +665,31 @@ class IIIGCNode(Node):
                 self.action_status = "Success"
                 self.action_status_lock_.release()
 
+    def set_target_cable_id(self, cable_id):
+        print("Setting target cable id: " + str(cable_id))
+
+        if self.action_status_lock_.acquire(blocking=True):
+            self.current_action = "SetTargetCableId"
+            self.action_status = "Waiting for reply"
+            self.action_status_lock_.release()
+
+        if not self.set_target_cable_id_srv_client.wait_for_service(timeout_sec=1.0):
+            if self.action_status_lock_.acquire(blocking=True):
+                self.action_status = "Cancelled"
+                self.action_status_lock_.release()
+
+        req = SetTargetCableId.Request()
+        req.target_cable_id = cable_id
+
+        future = self.set_target_cable_id_srv_client.call_async(req)
+        future.add_done_callback(self.set_target_cable_id_response_callback)
+
+    def set_target_cable_id_response_callback(self, future: rclpy.Future):
+        response: SetTargetCableId.Response = future.result()
+
+        if self.action_status_lock_.acquire(blocking=True):
+            self.action_status = "Success"
+            self.action_status_lock_.release()
 
     def cancel_action(self):
         self.action_client._cancel_goal(self.goal_handle)

@@ -17,11 +17,11 @@ from tf2_ros.transform_listener import TransformListener
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
-from std_msgs.msg import Int16, Float32
+from std_msgs.msg import Int16, Float32, String
 
 ###############################################################################
 # Custom interfaces:
-from iii_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus 
+from iii_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus
 from iii_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
 from iii_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging
 
@@ -104,6 +104,9 @@ class IIIGCNode(Node):
 
         self.gripper_status_ = GripperStatus()
         self.gripper_status_.gripper_status = GripperStatus.GRIPPER_STATUS_OPEN
+
+        self.cont_mission_orch_state = "unknown"
+        self.cont_mission_orch_state_lock_ = Lock()
 
         self.takeoff_client = ActionClient(self, Takeoff, "/trajectory_controller/takeoff",feedback_sub_qos_profile=qos)
         self.landing_client = ActionClient(self, Landing, "/trajectory_controller/landing",feedback_sub_qos_profile=qos)
@@ -190,6 +193,13 @@ class IIIGCNode(Node):
             GripperStatus,
             "/charger_gripper/gripper_status",
             self.on_gripper_status_msg,
+            qos_profile=qos
+        )
+
+        self.cont_mission_orch_state_sub_ = self.create_subscription(
+            String,
+            "/continuous_mission_orchestrator/state",
+            self.on_cont_mission_orch_state_msg,
             qos_profile=qos
         )
 
@@ -303,6 +313,11 @@ class IIIGCNode(Node):
         if self.gripper_status_lock_.acquire(blocking=True):
             self.gripper_status_ = msg
             self.gripper_status_lock_.release()
+
+    def on_cont_mission_orch_state_msg(self, msg: String):
+        if self.cont_mission_orch_state_lock_.acquire(blocking=True):
+            self.cont_mission_orch_state = msg.data
+            self.cont_mission_orch_state_lock_.release()
 
     def get_target_cable_id(self):
         if self.target_cable_id_lock_.acquire(blocking=True):
@@ -420,6 +435,15 @@ class IIIGCNode(Node):
         self.pl_lock_.release()
 
         return ids
+
+    def get_cont_mission_orch_state(self):
+        state = "unknown"
+
+        if self.cont_mission_orch_state_lock_.acquire(blocking=True):
+            state = self.cont_mission_orch_state
+            self.cont_mission_orch_state_lock_.release()
+
+        return state
 
     def send_takeoff_action_request(self, takeoff_height):
         print("Sending takeoff action request with height: "+str(takeoff_height))
@@ -689,6 +713,64 @@ class IIIGCNode(Node):
 
         if self.action_status_lock_.acquire(blocking=True):
             self.action_status = "Success"
+            self.action_status_lock_.release()
+
+    def initiate_charging(self):
+        print("Initiating charging")
+
+        if self.action_status_lock_.acquire(blocking=True):
+            self.current_action = "InitiateCharging"
+            self.action_status = "Waiting for reply"
+            self.action_status_lock_.release()
+
+        if not self.initiate_charging_srv_client.wait_for_service(timeout_sec=1.0):
+            if self.action_status_lock_.acquire(blocking=True):
+                self.action_status = "Cancelled"
+                self.action_status_lock_.release()
+
+        req = InitiateCharging.Request()
+
+        future = self.initiate_charging_srv_client.call_async(req)
+        future.add_done_callback(self.initiate_charging_response_callback)
+
+    def initiate_charging_response_callback(self, future: rclpy.Future):
+        response: InitiateCharging.Response = future.result()
+
+        if self.action_status_lock_.acquire(blocking=True):
+            if response.success:
+                self.action_status = "Success"
+            else:
+                self.action_status = "Cancelled"
+                
+            self.action_status_lock_.release()
+
+    def interrupt_charging(self):
+        print("Interrupting charging")
+
+        if self.action_status_lock_.acquire(blocking=True):
+            self.current_action = "InterruptCharging"
+            self.action_status = "Waiting for reply"
+            self.action_status_lock_.release()
+
+        if not self.interrupt_charging_srv_client.wait_for_service(timeout_sec=1.0):
+            if self.action_status_lock_.acquire(blocking=True):
+                self.action_status = "Cancelled"
+                self.action_status_lock_.release()
+
+        req = InterruptCharging.Request()
+
+        future = self.interrupt_charging_srv_client.call_async(req)
+        future.add_done_callback(self.interrupt_charging_response_callback)
+
+    def interrupt_charging_response_callback(self, future: rclpy.Future):
+        response: InterruptCharging.Response = future.result()
+
+        if self.action_status_lock_.acquire(blocking=True):
+            if response.success:
+                self.action_status = "Success"
+            else:
+                self.action_status = "Cancelled"
+                
             self.action_status_lock_.release()
 
     def cancel_action(self):

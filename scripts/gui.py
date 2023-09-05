@@ -1114,7 +1114,8 @@ class IIIGui():
     def update_set_target_cable_id_optionmenu(self):
         old_cable_ids = self.cable_ids
         self.cable_ids = self.node.get_cable_ids()
-        if len(old_cable_ids) == 0 or int(self.set_target_cable_id_stringvar.get()) not in self.cable_ids:
+        str_var = self.set_target_cable_id_stringvar.get()
+        if len(old_cable_ids) == 0 or str_var == "" or int(str_var) not in self.cable_ids:
             self.set_target_cable_id_stringvar.set(self.cable_ids[0] if len(self.cable_ids) > 0 else "")
         self.set_target_cable_id_optionmenu["menu"].delete(0, "end")
         for cable_id in self.cable_ids:

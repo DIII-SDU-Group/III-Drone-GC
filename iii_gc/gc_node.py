@@ -56,7 +56,7 @@ class IIIGCNode(Node):
 
         self.declare_parameter("config_file_path", "III-Drone-ROS2-pkg/config/params.yaml")
         # self.config_file_path = self.get_parameter("config_file_path").value
-        self.config_file_path = "/home/" + os.getenv("USER") + "/config.yaml"
+        self.config_file_path = "/home/" + os.getenv("USER") + "/.config/iii_drone/params.yaml"
 
         # self.config_file_path = os.path.dirname(os.path.realpath(__file__)).replace("install/iii_drone/lib/iii_drone", "src/"+config_file_path) 
 

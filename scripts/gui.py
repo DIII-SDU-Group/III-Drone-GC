@@ -100,11 +100,16 @@ class IIIGui():
         self.diagnostics_frame.grid(row=0, column=0)
 
             # Powerline visualization:
-        self.pl_viz_frame = tkinter.Frame(self.diagnostics_frame, bg="white")
-        self.pl_viz_frame.grid(row=0, column=0)
-
+        # Container Frame for PL Visualization and Title
+        self.pl_viz_container_frame = tkinter.Frame(self.diagnostics_frame, bg="#007BFF")
+        self.pl_viz_container_frame.grid(row=0, column=0, sticky="n")  # Stick to the north to limit size
+        self.diagnostics_frame.grid_rowconfigure(1, weight=1)
+        self.pl_viz_title = tkinter.Label(self.pl_viz_container_frame, text="Perceived Powerlines", font=("Arial", 16, "bold"), bg="#007BFF", relief="solid", borderwidth=1)
+        self.pl_viz_title.grid(row=0, column=0, sticky="new")
+        self.pl_viz_frame = tkinter.Frame(self.pl_viz_container_frame, bg="#007BFF", width=400, height=300, bd=2, relief="solid")
+        self.pl_viz_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         self.label_viz = tkinter.Label(self.pl_viz_frame)
-        self.label_viz.grid()
+        self.label_viz.grid(row=0, column=0, sticky="nsew")
 
         self.put_img()
 

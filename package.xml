@@ -1,11 +1,13 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>iii_gc</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="ffn@mmmi.sdu.dk">ffn</maintainer>
-  <license>TODO: License declaration</license>
+  <name>iii_drone_gc</name>
+  <version>2.2.0</version>
+  <description>
+    The iii_drone_gc package. This package contains the ground control functionality of the III-Drone system.
+  </description>
+  <maintainer email="ffn@sdu.dk">ffn</maintainer>
+  <license>Proprietary</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>

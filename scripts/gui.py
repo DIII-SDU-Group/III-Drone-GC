@@ -21,7 +21,7 @@ from iii_drone_gc.gc_node import IIIGCNode
 
 ###############################################################################
 # Custom interfaces:
-from iii_interfaces.msg import GripperStatus, ChargerOperatingMode, ChargerStatus
+from iii_drone_interfaces.msg import GripperStatus, ChargerOperatingMode, ChargerStatus
 
 ###############################################################################
 # Libraries:

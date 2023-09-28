@@ -23,7 +23,7 @@ from std_msgs.msg import Int16, Float32, String
 # Custom interfaces:
 from iii_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus
 from iii_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
-from iii_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging
+from iii_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging, ProlongCharging
 
 ###############################################################################
 # Custom modules:
@@ -56,7 +56,7 @@ class IIIGCNode(Node):
 
         self.declare_parameter("config_file_path", "III-Drone-ROS2-pkg/config/params.yaml")
         # self.config_file_path = self.get_parameter("config_file_path").value
-        self.config_file_path = "/home/" + os.getenv("USER") + "/config.yaml"
+        self.config_file_path = "/home/" + os.getenv("USER") + "/.config/iii_drone/params.yaml"
 
         # self.config_file_path = os.path.dirname(os.path.realpath(__file__)).replace("install/iii_drone/lib/iii_drone", "src/"+config_file_path) 
 
@@ -122,6 +122,7 @@ class IIIGCNode(Node):
         self.set_target_cable_id_srv_client = self.create_client(SetTargetCableId, "/continuous_mission_orchestrator/set_target_cable_id")
         self.initiate_charging_srv_client = self.create_client(InitiateCharging, "/continuous_mission_orchestrator/initiate_charging")
         self.interrupt_charging_srv_client = self.create_client(InterruptCharging, "/continuous_mission_orchestrator/interrupt_charging")
+        self.prolong_charging_srv_client = self.create_client(ProlongCharging, "/continuous_mission_orchestrator/prolong_charging")
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -764,6 +765,55 @@ class IIIGCNode(Node):
 
     def interrupt_charging_response_callback(self, future: rclpy.Future):
         response: InterruptCharging.Response = future.result()
+
+        if self.action_status_lock_.acquire(blocking=True):
+            if response.success:
+                self.action_status = "Success"
+            else:
+                self.action_status = "Cancelled"
+                
+            self.action_status_lock_.release()
+
+    def prolong_charging_until_interrupted(self):
+        print("Prolonging charging until interrupted")
+
+        if self.action_status_lock_.acquire(blocking=True):
+            self.current_action = "ProlongCharging"
+            self.action_status = "Waiting for reply"
+            self.action_status_lock_.release()
+
+        if not self.prolong_charging_srv_client.wait_for_service(timeout_sec=1.0):
+            if self.action_status_lock_.acquire(blocking=True):
+                self.action_status = "Cancelled"
+                self.action_status_lock_.release()
+
+        req = ProlongCharging.Request()
+        req.prolong_mode = ProlongCharging.Request.PROLONG_MODE_UNTIL_INTERRUPTED
+
+        future = self.prolong_charging_srv_client.call_async(req)
+        future.add_done_callback(self.prolong_charging_response_callback)
+
+    def prolong_charging_clear(self):
+        print("Prolonging charging clear")
+
+        if self.action_status_lock_.acquire(blocking=True):
+            self.current_action = "ProlongCharging"
+            self.action_status = "Waiting for reply"
+            self.action_status_lock_.release()
+
+        if not self.prolong_charging_srv_client.wait_for_service(timeout_sec=1.0):
+            if self.action_status_lock_.acquire(blocking=True):
+                self.action_status = "Cancelled"
+                self.action_status_lock_.release()
+
+        req = ProlongCharging.Request()
+        req.prolong_mode = ProlongCharging.Request.PROLONG_MODE_CLEAR
+
+        future = self.prolong_charging_srv_client.call_async(req)
+        future.add_done_callback(self.prolong_charging_response_callback)
+
+    def prolong_charging_response_callback(self, future: rclpy.Future):
+        response: ProlongCharging.Response = future.result()
 
         if self.action_status_lock_.acquire(blocking=True):
             if response.success:

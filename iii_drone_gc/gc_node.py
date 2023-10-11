@@ -21,13 +21,13 @@ from std_msgs.msg import Int16, Float32, String
 
 ###############################################################################
 # Custom interfaces:
-from iii_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus
-from iii_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
-from iii_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging, ProlongCharging
+from iii_drone_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus
+from iii_drone_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
+from iii_drone_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging, ProlongCharging
 
 ###############################################################################
 # Custom modules:
-from iii_gc.math import *
+from iii_drone_gc.math import *
 
 ###############################################################################
 # Libraries:

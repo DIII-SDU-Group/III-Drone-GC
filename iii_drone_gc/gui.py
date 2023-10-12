@@ -2122,8 +2122,7 @@ class IIIGui():
 # Main
 ###############################################################################
 
-
-if __name__ == "__main__":
+def main():
     rclpy.init()
 
     print("Starting IIIGui")
@@ -2136,4 +2135,6 @@ if __name__ == "__main__":
     # when the garbage collector destroys the node object)
     rclpy.shutdown()
 
-    
+
+if __name__ == "__main__":
+    main()

@@ -27,7 +27,7 @@ from iii_drone_interfaces.srv import GripperCommand, SetTargetCableId, InitiateC
 
 ###############################################################################
 # Custom modules:
-from iii_drone_gc.math import *
+from iii_drone_core.utils.math import *
 
 ###############################################################################
 # Libraries:

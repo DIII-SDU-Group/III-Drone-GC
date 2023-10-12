@@ -16,7 +16,7 @@ from nav_msgs.msg import Path
 
 ###############################################################################
 # Custom modules:
-from iii_drone_gc.math import *
+from iii_drone_core.utils.math import *
 from iii_drone_gc.gc_node import IIIGCNode
 
 ###############################################################################

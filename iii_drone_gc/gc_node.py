@@ -52,8 +52,6 @@ class IIIGCNode(Node):
         self.declare_parameter("takeoff_height_default", 1.0)
         self.declare_parameter("target_cable_distance_default", 1.5)
 
-        self.declare_parameter("/pl_dir_computer/pl_dir_computer/kf_r", 0.1)
-
         self.declare_parameter("config_file_path", "III-Drone-ROS2-pkg/config/params.yaml")
         # self.config_file_path = self.get_parameter("config_file_path").value
         self.config_file_path = "/home/" + os.getenv("USER") + "/.config/iii_drone/params.yaml"

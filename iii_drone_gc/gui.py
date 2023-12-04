@@ -64,15 +64,15 @@ class IIIGui():
 
         sleep(1)
 
-        self.config = yaml.safe_load(open(self.node.config_file_path,"r").read())
+        # self.config = yaml.safe_load(open(self.node.config_file_path,"r").read())
 
         self.config_node_keys = []
-        for key in self.config.keys():
-            key = str(key)
-            if (key == "/**" or key == "tf" or key == "iii_gui"):
-                continue
+        # for key in self.config.keys():
+        #     key = str(key)
+        #     if (key == "/**" or key == "tf" or key == "iii_gui"):
+        #         continue
 
-            self.config_node_keys.append(key)
+        #     self.config_node_keys.append(key)
 
         self.takeoff_height = self.node.get_parameter("takeoff_height_default").get_parameter_value().double_value
         self.target_pose = PoseStamped()

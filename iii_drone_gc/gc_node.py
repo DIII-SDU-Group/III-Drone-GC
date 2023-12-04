@@ -108,98 +108,98 @@ class IIIGCNode(Node):
         self.cont_mission_orch_state = "unknown"
         self.cont_mission_orch_state_lock_ = Lock()
 
-        self.takeoff_client = ActionClient(self, Takeoff, "/trajectory_controller/takeoff",feedback_sub_qos_profile=qos)
-        self.landing_client = ActionClient(self, Landing, "/trajectory_controller/landing",feedback_sub_qos_profile=qos)
-        self.fly_to_position_client = ActionClient(self, FlyToPosition, "/trajectory_controller/fly_to_position",feedback_sub_qos_profile=qos)
-        self.fly_under_cable_client = ActionClient(self, FlyUnderCable, "/trajectory_controller/fly_under_cable",feedback_sub_qos_profile=qos)
-        self.cable_landing_client = ActionClient(self, CableLanding, "/trajectory_controller/cable_landing",feedback_sub_qos_profile=qos)
-        self.cable_takeoff_client = ActionClient(self, CableTakeoff, "/trajectory_controller/cable_takeoff",feedback_sub_qos_profile=qos)
-        self.disarm_on_cable_client = ActionClient(self, DisarmOnCable, "/trajectory_controller/disarm_on_cable",feedback_sub_qos_profile=qos)
-        self.arm_on_cable_client = ActionClient(self, ArmOnCable, "/trajectory_controller/arm_on_cable",feedback_sub_qos_profile=qos)
+        self.takeoff_client = ActionClient(self, Takeoff, "/control/trajectory_controller/takeoff",feedback_sub_qos_profile=qos)
+        self.landing_client = ActionClient(self, Landing, "/control/trajectory_controller/landing",feedback_sub_qos_profile=qos)
+        self.fly_to_position_client = ActionClient(self, FlyToPosition, "/control/trajectory_controller/fly_to_position",feedback_sub_qos_profile=qos)
+        self.fly_under_cable_client = ActionClient(self, FlyUnderCable, "/control/trajectory_controller/fly_under_cable",feedback_sub_qos_profile=qos)
+        self.cable_landing_client = ActionClient(self, CableLanding, "/control/trajectory_controller/cable_landing",feedback_sub_qos_profile=qos)
+        self.cable_takeoff_client = ActionClient(self, CableTakeoff, "/control/trajectory_controller/cable_takeoff",feedback_sub_qos_profile=qos)
+        self.disarm_on_cable_client = ActionClient(self, DisarmOnCable, "/control/trajectory_controller/disarm_on_cable",feedback_sub_qos_profile=qos)
+        self.arm_on_cable_client = ActionClient(self, ArmOnCable, "/control/trajectory_controller/arm_on_cable",feedback_sub_qos_profile=qos)
 
-        self.gripper_command_srv_client = self.create_client(GripperCommand, "/charger_gripper/gripper_command")
+        self.gripper_command_srv_client = self.create_client(GripperCommand, "/payload/charger_gripper/gripper_command")
 
-        self.set_target_cable_id_srv_client = self.create_client(SetTargetCableId, "/continuous_mission_orchestrator/set_target_cable_id")
-        self.initiate_charging_srv_client = self.create_client(InitiateCharging, "/continuous_mission_orchestrator/initiate_charging")
-        self.interrupt_charging_srv_client = self.create_client(InterruptCharging, "/continuous_mission_orchestrator/interrupt_charging")
-        self.prolong_charging_srv_client = self.create_client(ProlongCharging, "/continuous_mission_orchestrator/prolong_charging")
+        self.set_target_cable_id_srv_client = self.create_client(SetTargetCableId, "/mission/continuous_mission_orchestrator/set_target_cable_id")
+        self.initiate_charging_srv_client = self.create_client(InitiateCharging, "/mission/continuous_mission_orchestrator/initiate_charging")
+        self.interrupt_charging_srv_client = self.create_client(InterruptCharging, "/mission/continuous_mission_orchestrator/interrupt_charging")
+        self.prolong_charging_srv_client = self.create_client(ProlongCharging, "/mission/continuous_mission_orchestrator/prolong_charging")
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.pl_sub_ = self.create_subscription(
             Powerline,
-            "/pl_mapper/powerline",
+            "/perception/pl_mapper/powerline",
             self.on_pl_msg,
             qos_profile=qos
         )
 
         self.control_state_sub_ = self.create_subscription(
             ControlState,
-            "/trajectory_controller/control_state",
+            "/control/trajectory_controller/control_state",
             self.on_state_msg,
             qos_profile=qos
         )
 
         self.target_cable_id_sub_ = self.create_subscription(
             Int16,
-            "/trajectory_controller/target_cable_id",
+            "/control/trajectory_controller/target_cable_id",
             self.on_target_cable_id_msg,
             qos_profile=qos
         )
 
         self.planned_target_sub_ = self.create_subscription(
             PoseStamped,
-            "/trajectory_controller/planned_target",
+            "/control/trajectory_controller/planned_target",
             self.on_planned_target_msg,
             qos_profile=qos
         )
 
         self.planned_trajectory_sub_ = self.create_subscription(
             Path,
-            "/trajectory_controller/planned_trajectory",
+            "/control/trajectory_controller/planned_trajectory",
             self.on_planned_trajectory_msg,
             qos_profile=qos
         )
 
         self.battery_voltage_sub_ = self.create_subscription(
             Float32,
-            "/charger_gripper/battery_voltage",
+            "/payload/charger_gripper/battery_voltage",
             self.on_battery_voltage_msg,
             qos_profile=qos
         )
 
         self.charging_power_sub_ = self.create_subscription(
             Float32,
-            "/charger_gripper/charging_power",
+            "/payload/charger_gripper/charging_power",
             self.on_charging_power_msg,
             qos_profile=qos
         )
 
         self.charger_operating_mode_sub_ = self.create_subscription(
             ChargerOperatingMode,
-            "/charger_gripper/charger_operating_mode",
+            "/payload/charger_gripper/charger_operating_mode",
             self.on_charger_operating_mode_msg,
             qos_profile=qos
         )
 
         self.charger_status_sub_ = self.create_subscription(
             ChargerStatus,
-            "/charger_gripper/charger_status",
+            "/payload/charger_gripper/charger_status",
             self.on_charger_status_msg,
             qos_profile=qos
         )
 
         self.gripper_status_sub_ = self.create_subscription(
             GripperStatus,
-            "/charger_gripper/gripper_status",
+            "/payload/charger_gripper/gripper_status",
             self.on_gripper_status_msg,
             qos_profile=qos
         )
 
         self.cont_mission_orch_state_sub_ = self.create_subscription(
             String,
-            "/continuous_mission_orchestrator/state",
+            "/mission/continuous_mission_orchestrator/state",
             self.on_cont_mission_orch_state_msg,
             qos_profile=qos
         )

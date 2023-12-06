@@ -7,6 +7,7 @@
 ###############################################################################
 # ROS2:
 import rclpy
+from rclpy.parameter import ParameterValue
 
 ###############################################################################
 # ROS2 interfaces:
@@ -17,7 +18,9 @@ from nav_msgs.msg import Path
 ###############################################################################
 # Custom modules:
 from iii_drone_core.utils.math import *
+from iii_drone_core.configuration.parameter_handler import ParameterHandler
 from iii_drone_gc.gc_node import IIIGCNode
+
 
 ###############################################################################
 # Custom interfaces:
@@ -31,7 +34,7 @@ import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import tkinter # note that module name has changed from Tkinter in Python 2 to tkinter in Python 3
-from tkinter import Toplevel
+from tkinter import Toplevel, ttk
 from PIL import ImageTk, Image
 
 ###############################################################################
@@ -41,6 +44,7 @@ from threading import Thread
 from time import sleep
 import yaml
 import subprocess
+from datetime import datetime
 
 ###############################################################################
 # Class
@@ -73,6 +77,12 @@ class IIIGui():
         #         continue
 
         #     self.config_node_keys.append(key)
+        
+        self.parameter_yaml = self.node.get_parameter_yaml()
+        
+        self.parameter_handler = ParameterHandler.from_raw_yaml_string(self.parameter_yaml)
+        
+        self.node.add_on_set_parameter_event_callback(self.on_set_parameter_event)
 
         self.takeoff_height = self.node.get_parameter("takeoff_height_default").get_parameter_value().double_value
         self.target_pose = PoseStamped()
@@ -93,6 +103,9 @@ class IIIGui():
         self.root.geometry(str(screen_width)+"x"+str(screen_height))
 
         self.vcmd_numeric = (self.root.register(self.validate_numeric_and_empty),
+                    '%d', '%i', '%P', '%s', '%S', '%v', '%V', '%W')
+        
+        self.vcmd_int = (self.root.register(self.validate_int_and_empty),
                     '%d', '%i', '%P', '%s', '%S', '%v', '%V', '%W')
 
         # Diagnostics:
@@ -402,8 +415,19 @@ class IIIGui():
         )
         self.action_view_high_level_button.grid(row=0, column=2)
 
-        self.current_action_view = "low level"
+        self.action_view_configuration_button = tkinter.Button(
+            self.action_view_select_buttons_frame,
+            text="Configuration",
+            command=self.on_configuration_action_view_select,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        
+        self.action_view_configuration_button.grid(row=0, column=3)
 
+        self.current_action_view = "low level"
+        
         # Low level action view
         self.low_level_action_view_frame = tkinter.Frame(self.action_control_frame, bg="#000000")
 
@@ -557,7 +581,7 @@ class IIIGui():
         self.fly_under_cable_target_cable_id_optionmenu = tkinter.OptionMenu(
             self.fly_under_cable_parameters_frame,
             self.fly_under_cable_target_cable_id_stringvar,
-            tuple(*self.cable_ids) if len(self.cable_ids) > 0 else (""),
+            tuple(self.cable_ids) if len(self.cable_ids) > 0 else (""),
         )
         self.fly_under_cable_target_cable_id_optionmenu.config(font=text_font)
         self.fly_under_cable_target_cable_id_optionmenu_menu = self.root.nametowidget(self.fly_under_cable_target_cable_id_optionmenu.menuname)
@@ -711,7 +735,7 @@ class IIIGui():
         self.set_target_cable_id_optionmenu = tkinter.OptionMenu(
             self.set_target_cable_id_parameters_frame,
             self.set_target_cable_id_stringvar,
-            tuple(*self.cable_ids) if len(self.cable_ids) > 0 else (""),
+            tuple(self.cable_ids) if len(self.cable_ids) > 0 else (""),
         )
         self.set_target_cable_id_optionmenu.config(font=text_font)
         self.set_target_cable_id_optionmenu_menu = self.root.nametowidget(self.set_target_cable_id_optionmenu.menuname)
@@ -779,12 +803,263 @@ class IIIGui():
         self.prolong_charging_mode_optionmenu_menu = self.root.nametowidget(self.prolong_charging_mode_optionmenu.menuname)
         self.prolong_charging_mode_optionmenu_menu.config(font=text_font)
         self.prolong_charging_mode_optionmenu.grid(row=0, column=1)
+        
+        # Configuration action view:
+        self.configuration_action_view_frame = tkinter.Frame(self.action_control_frame, bg="#000000")
+        
+        # Configuration parameters:
+        self.parameter_tree = ttk.Treeview(self.configuration_action_view_frame, columns=('Name', 'Value'), show='headings', height=10)
+        self.parameter_tree.heading('Name', text='Name')
+        self.parameter_tree.heading('Value', text='Value')
+        self.parameter_tree.column('Name', width=750, anchor='center')
+        self.parameter_tree.column('Value', width=200, anchor='center')
+
+        self.parameter_scrollbar = ttk.Scrollbar(self.configuration_action_view_frame, orient='vertical', command=self.parameter_tree.yview)
+        self.parameter_tree.configure(yscrollcommand=self.parameter_scrollbar.set)
+
+        self.parameter_tree.grid(row=0, column=0, sticky='nsew')
+        self.parameter_scrollbar.grid(row=0, column=1, sticky='ns')
+
+        self.parameter_tree.bind('<Double-1>', self.modify_parameter)
+
+        self.fill_parameter_table() 
+
+        # Save parameters:
+        self.save_parameters_button = tkinter.Button(
+            self.configuration_action_view_frame,
+            text="Save parameters on drone",
+            command=self.save_parameters_remote,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        
+        self.save_parameters_button.grid(row=1, column=0, pady=10)
+        
+        self.save_parameters_local_button = tkinter.Button(
+            self.configuration_action_view_frame,
+            text="Save parameters locally",
+            command=self.save_parameters_local,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        
+        self.save_parameters_local_button.grid(row=2, column=0, pady=10)
+        
+        # Load parameters:
+        self.load_parameters_button = tkinter.Button(
+            self.configuration_action_view_frame,
+            text="Load parameters from drone",
+            command=self.load_parameters_remote,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        
+        self.load_parameters_button.grid(row=3, column=0, pady=10)
 
         # Put action view:
         self.on_low_level_action_view_select()
 
         # Update actions:
         self.update_available_actions()
+        
+    def save_parameters_remote(self):
+        def save_parameters():
+            try:
+                file_name_str = file_name.get()
+                select_as_default_bool = select_as_default.get()
+                overwrite_bool = overwrite.get()
+                success, saved_file, message = self.node.save_parameters_remote(
+                    file_name_str,
+                    set_as_default=select_as_default_bool,
+                    overwrite=overwrite_bool
+                )
+
+                if not success:
+                    raise Exception(message)
+                
+                top.destroy()
+                
+                msg = tkinter.Toplevel(self.configuration_action_view_frame)
+                tkinter.Label(msg, text="Parameters saved successfully on the drone to {}.".format(saved_file)).pack()
+                tkinter.Button(msg, text='OK', command=msg.destroy).pack()
+                
+            except Exception as e:
+                # Display error message in popup:
+                error = tkinter.Toplevel(self.configuration_action_view_frame)
+                tkinter.Label(error, text=str(e)).pack()
+                tkinter.Button(error, text='OK', command=error.destroy).pack()
+                
+        top = tkinter.Toplevel(self.configuration_action_view_frame)
+        tkinter.Label(top, text='Save parameters on drone?').pack()
+        
+        file_name = tkinter.StringVar()
+        tkinter.Label(top, text='File name:').pack()
+        tkinter.Entry(top, textvariable=file_name).pack()
+        # Bool:
+        select_as_default = tkinter.BooleanVar()
+        tkinter.Checkbutton(top, text='Select as default', variable=select_as_default).pack()
+        overwrite = tkinter.BooleanVar()
+        tkinter.Checkbutton(top, text='Overwrite', variable=overwrite).pack()
+
+        tkinter.Button(top, text='Save', command=save_parameters).pack()
+        
+    def load_parameters_remote(self):
+        def load_parameter_file():
+            try:
+                file_name_str = file_name.get()
+                select_as_default_bool = select_as_default.get()
+                success, message = self.node.load_parameters_remote(file_name_str, set_as_default=select_as_default_bool)
+
+                if not success:
+                    raise Exception(message)
+                
+                top.destroy()
+                
+                self.update_parameter_table()
+                
+                msg = tkinter.Toplevel(self.configuration_action_view_frame)
+                tkinter.Label(msg, text="Parameters loaded successfully on the drone.").pack()
+                tkinter.Button(msg, text='OK', command=msg.destroy).pack()
+                
+            except Exception as e:
+                # Display error message in popup:
+                error = tkinter.Toplevel(self.configuration_action_view_frame)
+                tkinter.Label(error, text=str(e)).pack()
+                tkinter.Button(error, text='OK', command=error.destroy).pack()
+                
+        top = tkinter.Toplevel(self.configuration_action_view_frame)
+        tkinter.Label(top, text='Load parameters on drone').pack()
+        
+        file_name = tkinter.StringVar()
+        tkinter.Label(top, text='File name:').pack()
+        # Select file from dropdown:
+        file_names = self.node.get_parameter_files_remote()
+        if len(file_names) == 0:
+            raise Exception("No parameter files found on drone.")
+        
+        current_file_name = self.node.get_current_parameter_file()
+        
+        if current_file_name not in file_names:
+            raise Exception("Current parameter file {} not found on drone.".format(current_file_name))
+    
+        file_name.set(file_names[file_names.index(current_file_name)])
+        tkinter.OptionMenu(top, file_name, *file_names).pack()
+
+        # Bool:
+        select_as_default = tkinter.BooleanVar()
+        tkinter.Checkbutton(top, text='Select as default', variable=select_as_default).pack()
+
+        tkinter.Button(top, text='Load', command=load_parameter_file).pack()
+        
+    def save_parameters_local(self):
+        now = datetime.now()
+        # Format as yyyymmdd_hhmm:
+        dt_string = now.strftime("%Y%m%d_%H%M%S")
+        
+        file_name = "parameters_gc_" + dt_string + ".yaml"
+        
+        user = os.environ['USER']
+
+        path=os.path.join("/home", user, ".config/iii_drone/parameters", file_name)
+        
+        self.parameter_handler.save_parameters(path)
+        
+        message = "Parameters saved locally to {}.".format(path)
+        
+        msg = tkinter.Toplevel(self.configuration_action_view_frame)
+        tkinter.Label(msg, text=str(message)).pack()
+        tkinter.Button(msg, text='OK', command=msg.destroy).pack()
+
+    def modify_parameter(self, event):
+        item = self.parameter_tree.selection()[0]
+        name, value = self.parameter_tree.item(item, 'values')
+
+        param_dict = self.parameter_handler.get_param(name)
+        param_type = param_dict['type']
+        
+        if not (param_type == 'bool' or param_type == 'int' or param_type == 'float' or param_type == 'string'):
+            print("Cannot modify parameter of type " + param_type + ".")
+            return
+
+        def save_new_value():
+            try:
+                new_value = None
+                if param_type == 'bool':
+                    new_value = bool(value_entry.get())
+                elif param_type == 'int':   
+                    new_value = int(value_entry.get())
+                elif param_type == 'float':
+                    new_value = float(value_entry.get())
+                elif param_type == 'string':
+                    new_value = str(value_entry.get())
+                    
+                success, message = self.node.set_parameter_from_gc_remote(name, str(new_value))
+                
+                if not success:
+                    raise Exception(message)
+                
+                self.parameter_handler.set_param(name, new_value, True, force_constant=True)
+                top.destroy()
+
+                msg = tkinter.Toplevel(self.configuration_action_view_frame)
+                tkinter.Label(msg, text=str(message)).pack()
+                tkinter.Button(msg, text='OK', command=msg.destroy).pack()
+            
+            except Exception as e:
+                # Display error message in popup:
+                error = tkinter.Toplevel(self.configuration_action_view_frame)
+                tkinter.Label(error, text=str(e)).pack()
+                tkinter.Button(error, text='OK', command=error.destroy).pack()
+
+            self.update_parameter_table()
+            
+        top = tkinter.Toplevel(self.configuration_action_view_frame)
+        tkinter.Label(top, text='New value for ' + name).pack()
+
+        if param_type == 'bool':
+            value = bool(value)
+            value_entry = tkinter.Checkbutton(top, text='True', variable=value)
+            value_entry.pack()
+            
+        elif param_type == 'int':
+            value = int(value)
+            value_entry = tkinter.Entry(top, validate="key", validatecommand=self.vcmd_int)
+            value_entry.pack()
+            value_entry.insert(0, value)
+            
+        elif param_type == 'float':
+            value = float(value)
+            value_entry = tkinter.Entry(top, validate="key", validatecommand=self.vcmd_numeric)
+            value_entry.pack()
+            value_entry.insert(0, value)
+            
+        elif param_type == 'string':
+            if "options" in param_dict:
+                value_entry = tkinter.OptionMenu(top, value, *param_dict["options"])
+                # Set selected value of value_entry to current value:
+                value_entry["menu"].entryconfig(param_dict["options"].index(value))
+                value_entry.pack()
+            else:
+                value_entry = tkinter.Entry(top)
+                value_entry.pack()
+                value_entry.insert(0, value)
+            
+        else:
+            print("Cannot modify parameter of type " + param_type + ".")
+
+        tkinter.Button(top, text='Save', command=save_new_value).pack()
+        
+    def fill_parameter_table(self):
+        for name, param in self.parameter_handler.get_all_params().items():
+            self.parameter_tree.insert('', 'end', values=(name, param['value']))
+            
+    def update_parameter_table(self):
+        for item in self.parameter_tree.get_children():
+            self.parameter_tree.delete(item)
+        self.fill_parameter_table()
 
     def update_available_actions(self):
         control_state = self.node.get_control_state()
@@ -963,17 +1238,26 @@ class IIIGui():
     def on_gripper_action_view_select(self):
         self.low_level_action_view_frame.grid_forget()
         self.high_level_action_view_frame.grid_forget()
+        self.configuration_action_view_frame.grid_forget()
         self.gripper_ctrl_action_view_frame.grid(row=2, column=0, columnspan=2, pady=10)
 
     def on_low_level_action_view_select(self):
         self.high_level_action_view_frame.grid_forget()
         self.gripper_ctrl_action_view_frame.grid_forget()
+        self.configuration_action_view_frame.grid_forget()
         self.low_level_action_view_frame.grid(row=2, column=0, columnspan=2, sticky=tkinter.W+tkinter.E, pady=10)
 
     def on_high_level_action_view_select(self):
         self.low_level_action_view_frame.grid_forget()
         self.gripper_ctrl_action_view_frame.grid_forget()
+        self.configuration_action_view_frame.grid_forget()
         self.high_level_action_view_frame.grid(row=2, column=0, columnspan=2, sticky=tkinter.W+tkinter.E, pady=10)
+        
+    def on_configuration_action_view_select(self):
+        self.low_level_action_view_frame.grid_forget()
+        self.gripper_ctrl_action_view_frame.grid_forget()
+        self.high_level_action_view_frame.grid_forget()
+        self.configuration_action_view_frame.grid(row=2, column=0, columnspan=2, sticky=tkinter.W+tkinter.E, pady=10)
 
     def execute_takeoff(self):
         try:
@@ -1193,89 +1477,89 @@ class IIIGui():
             self.end = True
             self.node.destroy_node()
 
-    def set_params(self):
-        self.params_options_window = Toplevel(self.root)
-        self.params_options_window.title("Params options")
-        self.params_options_frame = tkinter.Frame(self.params_options_window, bg="white")
+    # def set_params(self):
+    #     self.params_options_window = Toplevel(self.root)
+    #     self.params_options_window.title("Params options")
+    #     self.params_options_frame = tkinter.Frame(self.params_options_window, bg="white")
 
-        self.params_options_frame.grid()
+    #     self.params_options_frame.grid()
 
-        node_key = self.param_stringvar.get()
+    #     node_key = self.param_stringvar.get()
 
-        params = []
-        for key in self.config[node_key][node_key]["ros__parameters"].keys():
-            params.append(str(key))
+    #     params = []
+    #     for key in self.config[node_key][node_key]["ros__parameters"].keys():
+    #         params.append(str(key))
 
-        param_stringvar = tkinter.StringVar(self.root)
-        param_stringvar.set(params[0])
-        param_optionmenu = tkinter.OptionMenu(
-            self.params_options_frame,
-            param_stringvar,
-            *params
-        )
+    #     param_stringvar = tkinter.StringVar(self.root)
+    #     param_stringvar.set(params[0])
+    #     param_optionmenu = tkinter.OptionMenu(
+    #         self.params_options_frame,
+    #         param_stringvar,
+    #         *params
+    #     )
 
-        param_optionmenu.grid()
+    #     param_optionmenu.grid()
 
-        value_label = tkinter.Label(
-            self.params_options_frame,
-            text="Parameter value:",
-            font=text_font
-        )
-        value_entry = tkinter.Entry(
-            self.params_options_frame
-        )
+    #     value_label = tkinter.Label(
+    #         self.params_options_frame,
+    #         text="Parameter value:",
+    #         font=text_font
+    #     )
+    #     value_entry = tkinter.Entry(
+    #         self.params_options_frame
+    #     )
 
-        value_label.grid()
-        value_entry.grid()
+    #     value_label.grid()
+    #     value_entry.grid()
 
-        def on_cancel_btn_click():
-            self.params_options_window.destroy()
-            self.params_options_window = None
-            self.params_options_frame = None
+    #     def on_cancel_btn_click():
+    #         self.params_options_window.destroy()
+    #         self.params_options_window = None
+    #         self.params_options_frame = None
 
-        def on_ok_btn_click():
-            value = value_entry.get()
-            param = param_stringvar.get()
+    #     def on_ok_btn_click():
+    #         value = value_entry.get()
+    #         param = param_stringvar.get()
 
-            parameter_type = type(self.config[node_key][node_key]["ros__parameters"][param])
+    #         parameter_type = type(self.config[node_key][node_key]["ros__parameters"][param])
 
-            success = True
+    #         success = True
 
-            try:
-                value = parameter_type(value)
-            except ValueError:
-                success = False
+    #         try:
+    #             value = parameter_type(value)
+    #         except ValueError:
+    #             success = False
 
-            if success:
-                node_name = "/" + node_key + "/" + node_key
+    #         if success:
+    #             node_name = "/" + node_key + "/" + node_key
 
-                bashCommand = str("ros2 param set " + str(node_name) + " " + str(param) + " " + str(value))
-                process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
-                output, error = process.communicate()
+    #             bashCommand = str("ros2 param set " + str(node_name) + " " + str(param) + " " + str(value))
+    #             process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
+    #             output, error = process.communicate()
 
-                self.node.get_logger().info(str(output))
-                self.node.get_logger().info(str(error))
+    #             self.node.get_logger().info(str(output))
+    #             self.node.get_logger().info(str(error))
 
-            self.params_options_window.destroy()
-            self.params_options_window = None
-            self.params_options_frame = None
+    #         self.params_options_window.destroy()
+    #         self.params_options_window = None
+    #         self.params_options_frame = None
 
-        ok_btn = tkinter.Button(
-            self.params_options_frame,
-            text="OK",
-            command=on_ok_btn_click,
-            font=buttons_font,
-        )
+    #     ok_btn = tkinter.Button(
+    #         self.params_options_frame,
+    #         text="OK",
+    #         command=on_ok_btn_click,
+    #         font=buttons_font,
+    #     )
 
-        cancel_btn = tkinter.Button(
-            self.params_options_frame,
-            text="Cancel",
-            command=on_cancel_btn_click,
-            font=buttons_font,
-        )
+    #     cancel_btn = tkinter.Button(
+    #         self.params_options_frame,
+    #         text="Cancel",
+    #         command=on_cancel_btn_click,
+    #         font=buttons_font,
+    #     )
 
-        ok_btn.grid()
-        cancel_btn.grid()
+    #     ok_btn.grid()
+    #     cancel_btn.grid()
 
     def execute_action(self):
         self.action_options_window = Toplevel(self.root)
@@ -1912,6 +2196,16 @@ class IIIGui():
             return True
         except ValueError:
             return False
+        
+    def validate_int_and_empty(self, action, index, value_if_allowed,
+                        prior_value, text, validation_type, trigger_type, widget_name):
+        if value_if_allowed == "\b" or value_if_allowed == "" or value_if_allowed == "-":
+            return True
+        try:
+            int(value_if_allowed)
+            return True
+        except ValueError:
+            return False
 
     def spin_node(self):
         while True:
@@ -2115,8 +2409,45 @@ class IIIGui():
                 self.label_viz.configure(image=imgtk)
 
         self.label_viz.after(100, self.put_img)
+        
+    def on_set_parameter_event(
+        self,
+        param_name: str,
+        param_value: ParameterValue
+    ):
+        if param_name == "default_parameter_file":
+            return
+        try:
+            param_dict = self.parameter_handler.get_param(param_name)
+            
+            param_type = param_dict["type"]
+            
+            if param_type == "bool":
+                param_value = param_value.bool_value
+            elif param_type == "int":
+                param_value = param_value.integer_value
+            elif param_type == "float":
+                param_value = param_value.double_value
+            elif param_type == "string":
+                param_value = param_value.string_value
+            elif param_type == "bool_array":
+                param_value = param_value.bool_array_value
+            elif param_type == "int_array":
+                param_value = param_value.integer_array_value
+            elif param_type == "float_array":
+                param_value = param_value.double_array_value
+            elif param_type == "string_array":
+                param_value = param_value.string_array_value
+            else:
+                raise Exception("Unknown parameter type: {}".format(param_type))
 
+            self.parameter_handler.set_param(param_name, param_value, True)
 
+        except Exception as e:
+            self.node.get_logger().fatal("Failed to set parameter: {}".format(e))
+            raise e
+
+        self.update_parameter_table()
 
 ###############################################################################
 # Main

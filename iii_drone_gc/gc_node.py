@@ -18,12 +18,14 @@ from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 from std_msgs.msg import Int16, Float32, String
+from rcl_interfaces.msg import ParameterEvent, Parameter
 
 ###############################################################################
 # Custom interfaces:
 from iii_drone_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus
 from iii_drone_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
 from iii_drone_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging, ProlongCharging
+from iii_drone_interfaces.srv import GetParameterYaml, GetDeclaredParameters, SaveParameters, GetParameterFiles, LoadParameters, SetParameterFromGC, GetCurrentParameterFile
 
 ###############################################################################
 # Custom modules:
@@ -37,6 +39,7 @@ import numpy as np
 # Python:
 import os
 from threading import Lock
+import yaml
 
 ###############################################################################
 # Class
@@ -63,6 +66,13 @@ class IIIGCNode(Node):
             durability=QoSDurabilityPolicy.RMW_QOS_POLICY_DURABILITY_VOLATILE,
             history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
             reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT
+        )
+
+        qos_reliable = QoSProfile(
+            depth=10,
+            durability=QoSDurabilityPolicy.RMW_QOS_POLICY_DURABILITY_VOLATILE,
+            history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
+            reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_RELIABLE
         )
         
         self.powerline_tuples_ = [] # (id, point)
@@ -121,6 +131,23 @@ class IIIGCNode(Node):
         self.initiate_charging_srv_client = self.create_client(InitiateCharging, "/mission/continuous_mission_orchestrator/initiate_charging")
         self.interrupt_charging_srv_client = self.create_client(InterruptCharging, "/mission/continuous_mission_orchestrator/interrupt_charging")
         self.prolong_charging_srv_client = self.create_client(ProlongCharging, "/mission/continuous_mission_orchestrator/prolong_charging")
+        
+        self.get_parameter_yaml_srv_client = self.create_client(GetParameterYaml, "/configuration/configuration_server/get_parameter_yaml")
+        self.get_declared_parameters_srv_client = self.create_client(GetDeclaredParameters, "/configuration/configuration_server/get_declared_parameters")
+        self.save_parameters_srv_client = self.create_client(SaveParameters, "/configuration/configuration_server/save_parameters")
+        self.get_parameter_files_srv_client = self.create_client(GetParameterFiles, "/configuration/configuration_server/get_parameter_files")
+        self.load_parameters_srv_client = self.create_client(LoadParameters, "/configuration/configuration_server/load_parameters")
+        self.set_parameter_from_gc_srv_client = self.create_client(SetParameterFromGC, "/configuration/configuration_server/set_parameter_from_gc")
+        self.get_current_parameter_file_srv_client = self.create_client(GetCurrentParameterFile, "/configuration/configuration_server/get_current_parameter_file")
+        
+        self.parameter_event_sub = self.create_subscription(
+            ParameterEvent,
+            "/parameter_events",
+            self.on_parameter_event,
+            qos_profile=qos_reliable
+        )
+        
+        self._on_set_parameter_callback = None
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -204,6 +231,9 @@ class IIIGCNode(Node):
 
         self.current_action = "None"
         self.action_status = "Idle"
+        
+    def add_on_set_parameter_event_callback(self, callback):
+        self._on_set_parameter_callback = callback
 
     def on_pl_msg(self, msg: Powerline):
         if self.pl_lock_.acquire(blocking=True):
@@ -823,3 +853,170 @@ class IIIGCNode(Node):
 
     def cancel_action(self):
         self.action_client._cancel_goal(self.goal_handle)
+        
+    def get_parameter_yaml(self) -> str:
+        print("Getting parameter yaml")
+
+        if not self.get_parameter_yaml_srv_client.wait_for_service(timeout_sec=5.0):
+            raise Exception("Configuration server not available")
+
+        req = GetParameterYaml.Request()
+        
+        future = self.get_parameter_yaml_srv_client.call_async(req)
+        
+        while not future.done():
+            rclpy.spin_once(self)
+        
+        response: "GetParameterYaml.Response" = future.result()
+        
+        return response.yaml
+    
+    def get_declared_parameters(self) -> dict:
+        print("Getting declared parameters")
+
+        if not self.get_declared_parameters_srv_client.wait_for_service(timeout_sec=5.0):
+            raise Exception("Configuration server not available")
+
+        req = GetDeclaredParameters.Request()
+        
+        future = self.get_declared_parameters_srv_client.call_async(req)
+        
+        while not future.done():
+            rclpy.spin_once(self)
+        
+        response: "GetDeclaredParameters.Response" = future.result()
+        
+        return yaml.safe_load(response.declared_parameters_yaml)
+    
+    def save_parameters_remote(
+        self,
+        file: str,
+        set_as_default: bool = True,
+        overwrite: bool = False
+    ) -> "tuple[bool|str]":
+        print("Saving parameters remotely")
+
+        if not self.save_parameters_srv_client.wait_for_service(timeout_sec=5.0):
+            raise Exception("Configuration server not available")
+
+        req = SaveParameters.Request()
+        req.file = file
+        req.set_as_default = set_as_default
+        req.overwrite = overwrite
+        
+        future = self.save_parameters_srv_client.call_async(req)
+        
+        while not future.done():
+            rclpy.spin_once(self)
+        
+        response: "SaveParameters.Response" = future.result()
+
+        if not response.success:
+            print("Saving parameters remotely failed with message:", response.message)
+        else:
+            print("Saving parameters remotely succeeded")
+        
+        return response.success, response.file, response.message
+    
+    def get_parameter_files_remote(self) -> list:
+        print("Getting parameter files remotely")
+
+        if not self.get_parameter_files_srv_client.wait_for_service(timeout_sec=5.0):
+            raise Exception("Configuration server not available")
+
+        req = GetParameterFiles.Request()
+        
+        future = self.get_parameter_files_srv_client.call_async(req)
+        
+        while not future.done():
+            rclpy.spin_once(self)
+        
+        response: "GetParameterFiles.Response" = future.result()
+        
+        return response.parameter_files
+    
+    def load_parameters_remote(
+        self,
+        file: str,
+        set_as_default: bool = True,
+        overwrite: bool = False
+    ) -> "tuple[bool|str]":
+        print("Loading parameters remotely")
+
+        if not self.load_parameters_srv_client.wait_for_service(timeout_sec=5.0):
+            raise Exception("Configuration server not available")
+
+        req = LoadParameters.Request()
+        req.file = file
+        req.set_as_default = set_as_default
+        
+        future = self.load_parameters_srv_client.call_async(req)
+        
+        while not future.done():
+            rclpy.spin_once(self)
+        
+        response: "LoadParameters.Response" = future.result()
+
+        if not response.success:
+            print("Loading parameters remotely failed with message:", response.message)
+        else:
+            print("Loading parameters remotely succeeded")
+        
+        return response.success, response.message
+    
+    def set_parameter_from_gc_remote(
+        self,
+        name: str,
+        value: str,
+    ) -> "tuple[bool|str]":
+        print("Setting parameter from ground control remotely")
+        
+        if not self.set_parameter_from_gc_srv_client.wait_for_service(timeout_sec=5.0):
+            raise Exception("Configuration server not available")
+        
+        req = SetParameterFromGC.Request()
+        req.parameter_name = name
+        req.parameter_string_value = str(value)
+        
+        future = self.set_parameter_from_gc_srv_client.call_async(req)
+        
+        while not future.done():
+            rclpy.spin_once(self)
+            
+        response: "SetParameterFromGC.Response" = future.result()
+        
+        if not response.success:
+            print("Setting parameter from ground control remotely failed with message:", response.message)
+            
+        else:
+            print("Setting parameter from ground control remotely succeeded")
+            
+        return response.success, response.message
+    
+    def get_current_parameter_file(
+        self,
+    ) -> "str":
+        print("Getting current parameter file")
+        
+        if not self.get_current_parameter_file_srv_client.wait_for_service(timeout_sec=5.0):
+            raise Exception("Configuration server not available")
+        
+        req = GetCurrentParameterFile.Request()
+        
+        future = self.get_current_parameter_file_srv_client.call_async(req)
+        
+        while not future.done():
+            rclpy.spin_once(self)
+            
+        response: "GetCurrentParameterFile.Response" = future.result()
+        
+        return response.current_parameter_file
+    
+    def on_parameter_event(self, msg: ParameterEvent):
+        if self._on_set_parameter_callback is not None:
+            for param in msg.changed_parameters:
+                param: Parameter
+                self._on_set_parameter_callback(
+                    param.name,
+                    param.value
+                )

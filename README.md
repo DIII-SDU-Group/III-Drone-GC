@@ -14,12 +14,23 @@ This version is compatible with
 See [`III-Drone-Core`](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging) for more information.
 
 ## Installation and build
-Follow the installation and build guide from [III-Drone-Core](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging).
+Follow the installation and build guide from [III-Drone-Core](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging). For simulation, follow the guide from [III-Drone-Simulation](https://github.com/DIII-SDU-Group/III-Drone-Simulation/tree/v2.2-staging).
 
 ## Launching the ground control GUI
-After build and installation, the ground control GUI is launched as follows:
+After build and installation, run the simulation (steps in the `III-Drone-Simulation` package):
+```
+cd <PX4-Autopilot-dir>
+PX4_NO_FOLLOW_MODE=1 make px4_sitl gazebo-classic_d4s_dc_drone__hca_full_pylon_setup
+```
+In a new terminal, launch the III-Drone system:
+```
+cd <ros2-ws>
+source install/setup.sh
+ros2 launch iii_drone_core iii_drone.launch.py
+```
+Finally, in a new terminal, the ground control GUI is launched as follows:
 ```
 cd <ROS2-DIII-workspace>
 source install/setup.sh
-ros2 run iii_drone_gc gui.py --ros-args --params-file ~/.config/iii_drone/params.yaml
+ros2 run iii_drone_gc gui.py --ros-args --params-file src/III-Drone-GC/config/params.yaml
 ```

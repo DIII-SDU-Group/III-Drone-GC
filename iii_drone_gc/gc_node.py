@@ -22,7 +22,7 @@ from rcl_interfaces.msg import ParameterEvent, Parameter
 
 ###############################################################################
 # Custom interfaces:
-from iii_drone_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus
+from iii_drone_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus, SingleLine
 from iii_drone_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
 from iii_drone_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging, ProlongCharging
 from iii_drone_interfaces.srv import GetParameterYaml, GetDeclaredParameters, SaveParameters, GetParameterFiles, LoadParameters, SetParameterFromGC, GetCurrentParameterFile
@@ -240,22 +240,23 @@ class IIIGCNode(Node):
             self.powerline_tuples_ = []
             self.powerline_quat_ = None
 
-            for i in range(msg.count):
-                pose = msg.poses[i]
-                id = msg.ids[i]
+            for i in range(len(msg.lines)):
+                line: "SingleLine" = msg.lines[i]
+                pose = line.pose
+                id = line.id
                 point = [
-                    pose.pose.position.x,
-                    pose.pose.position.y,
-                    pose.pose.position.z
+                    pose.position.x,
+                    pose.position.y,
+                    pose.position.z
                 ]
                 self.powerline_tuples_.append((id, point))
 
                 if (self.powerline_quat_ is None):
                     self.powerline_quat_ = [
-                        pose.pose.orientation.w,
-                        pose.pose.orientation.x,
-                        pose.pose.orientation.y,
-                        pose.pose.orientation.z
+                        pose.orientation.w,
+                        pose.orientation.x,
+                        pose.orientation.y,
+                        pose.orientation.z
                     ]
 
             self.pl_lock_.release()

@@ -18,7 +18,7 @@ from nav_msgs.msg import Path
 ###############################################################################
 # Custom modules:
 from iii_drone_core.utils.math import *
-from iii_drone_core.configuration.parameter_handler import ParameterHandler
+from iii_drone_configuration.parameter_handler import ParameterHandler
 from iii_drone_gc.gc_node import IIIGCNode
 
 
@@ -84,13 +84,12 @@ class IIIGui():
         
         self.node.add_on_set_parameter_event_callback(self.on_set_parameter_event)
 
-        self.takeoff_height = self.node.get_parameter("takeoff_height_default").get_parameter_value().double_value
-        self.target_pose = PoseStamped()
-        self.target_cable_id = 0
-        self.target_cable_distance = self.node.get_parameter("target_cable_distance_default").get_parameter_value().double_value
-        self.flight_distance = 1.
-        self.flight_velocity = 1.
-        self.invert_flight_direction = False
+        # self.target_pose = PoseStamped()
+        # self.target_cable_id = 0
+        # self.target_cable_distance = self.node.get_parameter("target_cable_distance_default").get_parameter_value().double_value
+        # self.flight_distance = 1.
+        # self.flight_velocity = 1.
+        # self.invert_flight_direction = False
 
         self.current_action = "None"
         self.action_status = "Idle"
@@ -126,7 +125,7 @@ class IIIGui():
 
         self.put_img()
 
-            # Data:
+        # Data:
         self.diagnostics_data_frame = tkinter.Frame(self.diagnostics_frame, bg="white")
         self.diagnostics_data_frame.grid(row=1, column=0)
 

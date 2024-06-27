@@ -22,9 +22,14 @@ from rcl_interfaces.msg import ParameterEvent, Parameter
 
 ###############################################################################
 # Custom interfaces:
-from iii_drone_interfaces.msg import Powerline, ControlState, ChargerOperatingMode, ChargerStatus, GripperStatus, SingleLine
-from iii_drone_interfaces.action import Takeoff, Landing, FlyToPosition, FlyUnderCable, CableLanding, CableTakeoff, DisarmOnCable, ArmOnCable
-from iii_drone_interfaces.srv import GripperCommand, SetTargetCableId, InitiateCharging, InterruptCharging, ProlongCharging
+from iii_drone_interfaces.msg import (
+    CombinedDroneAwareness,
+    Maneuver,
+    Target,
+    StringStamped
+    
+)
+from iii_drone_interfaces.srv import GripperCommand
 from iii_drone_interfaces.srv import GetParameterYaml, GetDeclaredParameters, SaveParameters, GetParameterFiles, LoadParameters, SetParameterFromGC, GetCurrentParameterFile
 
 ###############################################################################
@@ -75,31 +80,36 @@ class IIIGCNode(Node):
             reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_RELIABLE
         )
         
+        self.current_action = "None"
+        self.action_status = "None"
+        self.action_status_lock_ = Lock()
+        
         self.powerline_tuples_ = [] # (id, point)
         self.powerline_quat_ = None
         
         self.pl_lock_ = Lock()
-        self.img_lock_ = Lock()
-        self.control_state_lock_ = Lock()
-        self.action_status_lock_ = Lock()
+        self.combined_drone_awareness_lock_ = Lock()
+        self.current_maneuver_lock_ = Lock()
         self.target_lock_ = Lock()
+        self.target_pose_lock_ = Lock()
         self.traj_lock_ = Lock()
+        self.reference_mode_lock_ = Lock()
         self.battery_voltage_lock_ = Lock()
         self.charging_power_lock_ = Lock()
         self.charger_operating_mode_lock_ = Lock()
         self.charger_status_lock_ = Lock()
         self.gripper_status_lock_ = Lock()
-        self.target_cable_id_lock_ = Lock()
-
-        self.future = None
-        self.goal_handle = None
-        self.action_client = None
 
         self.img_ = None
-        self.control_state_ = "unknown"
+        self.combined_drone_awareness = None
+        self.current_maneuver = None
         self.target = None
+        self.target_pose = None
         self.traj = None
-        self.target_cable_id_ = None
+        self.reference_mode = None
+        self.pl = None
+        self.powerline_tuples_ = []
+        self.powerline_quat_ = None
 
         self.battery_voltage_ = -1
         self.charging_power_ = -1
@@ -113,25 +123,8 @@ class IIIGCNode(Node):
         self.gripper_status_ = GripperStatus()
         self.gripper_status_.gripper_status = GripperStatus.GRIPPER_STATUS_OPEN
 
-        self.cont_mission_orch_state = "unknown"
-        self.cont_mission_orch_state_lock_ = Lock()
-
-        self.takeoff_client = ActionClient(self, Takeoff, "/control/trajectory_controller/takeoff",feedback_sub_qos_profile=qos)
-        self.landing_client = ActionClient(self, Landing, "/control/trajectory_controller/landing",feedback_sub_qos_profile=qos)
-        self.fly_to_position_client = ActionClient(self, FlyToPosition, "/control/trajectory_controller/fly_to_position",feedback_sub_qos_profile=qos)
-        self.fly_under_cable_client = ActionClient(self, FlyUnderCable, "/control/trajectory_controller/fly_under_cable",feedback_sub_qos_profile=qos)
-        self.cable_landing_client = ActionClient(self, CableLanding, "/control/trajectory_controller/cable_landing",feedback_sub_qos_profile=qos)
-        self.cable_takeoff_client = ActionClient(self, CableTakeoff, "/control/trajectory_controller/cable_takeoff",feedback_sub_qos_profile=qos)
-        self.disarm_on_cable_client = ActionClient(self, DisarmOnCable, "/control/trajectory_controller/disarm_on_cable",feedback_sub_qos_profile=qos)
-        self.arm_on_cable_client = ActionClient(self, ArmOnCable, "/control/trajectory_controller/arm_on_cable",feedback_sub_qos_profile=qos)
-
         self.gripper_command_srv_client = self.create_client(GripperCommand, "/payload/charger_gripper/gripper_command")
 
-        self.set_target_cable_id_srv_client = self.create_client(SetTargetCableId, "/mission/continuous_mission_orchestrator/set_target_cable_id")
-        self.initiate_charging_srv_client = self.create_client(InitiateCharging, "/mission/continuous_mission_orchestrator/initiate_charging")
-        self.interrupt_charging_srv_client = self.create_client(InterruptCharging, "/mission/continuous_mission_orchestrator/interrupt_charging")
-        self.prolong_charging_srv_client = self.create_client(ProlongCharging, "/mission/continuous_mission_orchestrator/prolong_charging")
-        
         self.get_parameter_yaml_srv_client = self.create_client(GetParameterYaml, "/configuration/configuration_server/get_parameter_yaml")
         self.get_declared_parameters_srv_client = self.create_client(GetDeclaredParameters, "/configuration/configuration_server/get_declared_parameters")
         self.save_parameters_srv_client = self.create_client(SaveParameters, "/configuration/configuration_server/save_parameters")
@@ -152,38 +145,45 @@ class IIIGCNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        self.pl_sub_ = self.create_subscription(
-            Powerline,
-            "/perception/pl_mapper/powerline",
-            self.on_pl_msg,
+        self.combined_drone_awareness_sub_ = self.create_subscription(
+            CombinedDroneAwareness,
+            "/control/maneuver_controller/combined_drone_awareness",
+            self.on_combined_drone_awareness_msg,
             qos_profile=qos
         )
-
-        self.control_state_sub_ = self.create_subscription(
-            ControlState,
-            "/control/trajectory_controller/control_state",
-            self.on_state_msg,
+        
+        self.current_maneuver_sub_ = self.create_subscription(
+            Maneuver,
+            "/control/maneuver_controller/current_maneuver",
+            self.on_current_maneuver_msg,
             qos_profile=qos
         )
-
-        self.target_cable_id_sub_ = self.create_subscription(
-            Int16,
-            "/control/trajectory_controller/target_cable_id",
-            self.on_target_cable_id_msg,
+        
+        self.target_sub_ = self.create_subscription(
+            Target,
+            "/control/maneuver_controller/target",
+            self.on_target_msg,
             qos_profile=qos
         )
-
-        self.planned_target_sub_ = self.create_subscription(
+        
+        self.target_pose_sub_ = self.create_subscription(
             PoseStamped,
-            "/control/trajectory_controller/planned_target",
-            self.on_planned_target_msg,
+            "/control/trajectory_controller/target_pose",
+            self.on_target_pose_msg,
             qos_profile=qos
         )
 
-        self.planned_trajectory_sub_ = self.create_subscription(
+        self.trajectory_path_sub_ = self.create_subscription(
             Path,
-            "/control/trajectory_controller/planned_trajectory",
-            self.on_planned_trajectory_msg,
+            "/control/trajectory_controller/trajectory_path",
+            self.on_trajectory_path_msg,
+            qos_profile=qos
+        )
+
+        self.reference_mode_sub_ = self.create_subscription(
+            StringStamped,
+            "/mission/mission_executor/maneuver_reference_client/reference_mode",
+            self.on_reference_mode_msg,
             qos_profile=qos
         )
 
@@ -222,16 +222,13 @@ class IIIGCNode(Node):
             qos_profile=qos
         )
 
-        self.cont_mission_orch_state_sub_ = self.create_subscription(
-            String,
-            "/mission/continuous_mission_orchestrator/state",
-            self.on_cont_mission_orch_state_msg,
+        self.pl_sub_ = self.create_subscription(
+            Powerline,
+            "/perception/pl_mapper/powerline",
+            self.on_pl_msg,
             qos_profile=qos
         )
 
-        self.current_action = "None"
-        self.action_status = "Idle"
-        
     def add_on_set_parameter_event_callback(self, callback):
         self._on_set_parameter_callback = callback
 
@@ -261,106 +258,91 @@ class IIIGCNode(Node):
 
             self.pl_lock_.release()
 
-    def on_state_msg(self, msg: ControlState):
-        if self.control_state_lock_.acquire(blocking=True):
-            if msg.state == ControlState.CONTROL_STATE_INIT:
-                self.control_state_ = "init"
-            elif msg.state == ControlState.CONTROL_STATE_ON_GROUND_NON_OFFBOARD:
-                self.control_state_ = "on ground non offboard"
-            elif msg.state == ControlState.CONTROL_STATE_IN_FLIGHT_NON_OFFBOARD:
-                self.control_state_ = "in flight non offboard"
-            elif msg.state == ControlState.CONTROL_STATE_ARMING:
-                self.control_state_ = "arming"
-            elif msg.state == ControlState.CONTROL_STATE_SETTING_OFFBOARD:
-                self.control_state_ = "setting offboard"
-            elif msg.state == ControlState.CONTROL_STATE_TAKING_OFF:
-                self.control_state_ = "taking off"
-            elif msg.state == ControlState.CONTROL_STATE_HOVERING:
-                self.control_state_ = "hovering"
-            elif msg.state == ControlState.CONTROL_STATE_LANDING:
-                self.control_state_ = "landing"
-            elif msg.state == ControlState.CONTROL_STATE_IN_POSITIONAL_FLIGHT:
-                self.control_state_ = "in positional flight"
-            elif msg.state == ControlState.CONTROL_STATE_DURING_CABLE_LANDING:
-                self.control_state_ = "during cable landing"
-            elif msg.state == ControlState.CONTROL_STATE_ON_CABLE_ARMED:
-                self.control_state_ = "on cable armed"
-            elif msg.state == ControlState.CONTROL_STATE_DURING_CABLE_TAKEOFF:
-                self.control_state_ = "during cable takeoff"
-            elif msg.state == ControlState.CONTROL_STATE_HOVERING_UNDER_CABLE:
-                self.control_state_ = "hovering under cable"
-            elif msg.state == ControlState.CONTROL_STATE_FLYING_ALONG_CABLE:
-                self.control_state_ = "flying along cable"
-            elif msg.state == ControlState.CONTROL_STATE_DISARMING_ON_CABLE:
-                self.control_state_ = "disarming on cable"
-            elif msg.state == ControlState.CONTROL_STATE_ON_CABLE_DISARMED:
-                self.control_state_ = "on cable disarmed"
-            elif msg.state == ControlState.CONTROL_STATE_ARMING_ON_CABLE:
-                self.control_state_ = "arming on cable"
-            elif msg.state == ControlState.CONTROL_STATE_SETTING_OFFBOARD_ON_CABLE:
-                self.control_state_ = "setting offboard on cable"
-            else:
-                self.control_state_ = "unknown"
-
-            self.control_state_lock_.release()
-
-    def on_target_cable_id_msg(self, msg: Int16):
-        if self.target_cable_id_lock_.acquire(blocking=True):
-            self.target_cable_id_ = msg.data if msg.data >= 0 else None
-            self.target_cable_id_lock_.release()
-
-    def on_planned_target_msg(self, msg: PoseStamped):
+    def on_combined_drone_awareness_msg(self, msg: CombinedDroneAwareness):
+        if self.combined_drone_awareness_lock_.acquire(blocking=True):
+            self.combined_drone_awareness = msg
+            self.combined_drone_awareness_lock_.release()
+            
+    def on_current_maneuver_msg(self, msg: Maneuver):
+        if self.current_maneuver_lock_.acquire(blocking=True):
+            self.current_maneuver = msg
+            self.current_maneuver_lock_.release()
+            
+    def on_target_msg(self, msg: Target):
         if self.target_lock_.acquire(blocking=True):
             self.target = msg
             self.target_lock_.release()
-
-    def on_planned_trajectory_msg(self, msg: Path):
+            
+    def on_target_pose_msg(self, msg: PoseStamped):
+        if self.target_pose_lock_.acquire(blocking=True):
+            self.target_pose = msg
+            self.target_pose_lock_.release()
+            
+    def on_trajectory_path_msg(self, msg: Path):
         if self.traj_lock_.acquire(blocking=True):
             self.traj = msg
             self.traj_lock_.release()
-
+            
+    def on_reference_mode_msg(self, msg: StringStamped):
+        if self.reference_mode_lock_.acquire(blocking=True):
+            self.reference_mode = msg
+            self.reference_mode_lock_.release()
+            
     def on_battery_voltage_msg(self, msg: Float32):
         if self.battery_voltage_lock_.acquire(blocking=True):
             self.battery_voltage_ = msg.data
             self.battery_voltage_lock_.release()
-
+            
     def on_charging_power_msg(self, msg: Float32):
         if self.charging_power_lock_.acquire(blocking=True):
             self.charging_power_ = msg.data
             self.charging_power_lock_.release()
-
+            
     def on_charger_operating_mode_msg(self, msg: ChargerOperatingMode):
         if self.charger_operating_mode_lock_.acquire(blocking=True):
             self.charger_operating_mode_ = msg
             self.charger_operating_mode_lock_.release()
-
+            
     def on_charger_status_msg(self, msg: ChargerStatus):
         if self.charger_status_lock_.acquire(blocking=True):
             self.charger_status_ = msg
             self.charger_status_lock_.release()
-
+            
     def on_gripper_status_msg(self, msg: GripperStatus):
         if self.gripper_status_lock_.acquire(blocking=True):
             self.gripper_status_ = msg
             self.gripper_status_lock_.release()
-
-    def on_cont_mission_orch_state_msg(self, msg: String):
-        if self.cont_mission_orch_state_lock_.acquire(blocking=True):
-            self.cont_mission_orch_state = msg.data
-            self.cont_mission_orch_state_lock_.release()
-
-    def get_target_cable_id(self):
-        if self.target_cable_id_lock_.acquire(blocking=True):
-            id = self.target_cable_id_
-            self.target_cable_id_lock_.release()
-            return id
-
+            
+    def get_combined_drone_awareness(self):
+        if self.combined_drone_awareness_lock_.acquire(blocking=True):
+            msg = self.combined_drone_awareness
+            self.combined_drone_awareness_lock_.release()
+            return msg
+        
+    def get_current_maneuver(self):
+        if self.current_maneuver_lock_.acquire(blocking=True):
+            msg = self.current_maneuver
+            self.current_maneuver_lock_.release()
+            return msg
+        
+    def get_target(self):
+        if self.target_lock_.acquire(blocking=True):
+            msg = self.target
+            self.target_lock_.release()
+            return msg
+        
+    def get_reference_mode(self):
+        if self.reference_mode_lock_.acquire(blocking=True):
+            msg = self.reference_mode
+            self.reference_mode_lock_.release()
+            return msg
+        
     def get_battery_voltage(self):
         if self.battery_voltage_lock_.acquire(blocking=True):
             voltage = self.battery_voltage_
             self.battery_voltage_lock_.release()
             return voltage
-        
+
     def get_charging_power(self):
         if self.charging_power_lock_.acquire(blocking=True):
             power = self.charging_power_
@@ -394,20 +376,11 @@ class IIIGCNode(Node):
             
         return img
 
-    def get_control_state(self):
-        state = "unknown"
-        
-        if (self.control_state_lock_.acquire(blocking=True)):
-            state = self.control_state_
-            self.control_state_lock_.release()
-            
-        return state
-
-    def get_target(self):
+    def get_target_pose(self):
         target = None
         
-        if (self.target_lock_.acquire(blocking=True)):
-            if self.target is not None:
+        if (self.target_pose_lock_.acquire(blocking=True)):
+            if self.target_pose is not None:
                 drone_frame_id = self.get_parameter("drone_frame_id").value
                 world_frame_id = self.get_parameter("world_frame_id").value
                 try:
@@ -449,214 +422,12 @@ class IIIGCNode(Node):
             
         return traj
 
-    def get_action_status(self):
-        current_action, action_status = "None", "Idle"
-
-        if self.action_status_lock_.acquire(blocking=True):
-            current_action = self.current_action
-            action_status = self.action_status
-            self.action_status_lock_.release()
-
-        return current_action, action_status
-
     def get_cable_ids(self):       
         self.pl_lock_.acquire(blocking=True)
         ids = [self.powerline_tuples_[i][0] for i in range(len(self.powerline_tuples_))]
         self.pl_lock_.release()
 
         return ids
-
-    def get_cont_mission_orch_state(self):
-        state = "unknown"
-
-        if self.cont_mission_orch_state_lock_.acquire(blocking=True):
-            state = self.cont_mission_orch_state
-            self.cont_mission_orch_state_lock_.release()
-
-        return state
-
-    def send_takeoff_action_request(self, takeoff_height):
-        print("Sending takeoff action request with height: "+str(takeoff_height))
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "Takeoff"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        goal_msg = Takeoff.Goal()
-        goal_msg.target_altitude = takeoff_height
-        
-        if not self.takeoff_client.wait_for_server(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-        
-        self.future = self.takeoff_client.send_goal_async(goal_msg)
-        self.future.add_done_callback(self.goal_response_callback)
-
-    def send_landing_action_request(self):
-        print("Sending landing action request")
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "Landing"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        goal_msg = Landing.Goal()
-        
-        if not self.landing_client.wait_for_server(timeout_sec=1.):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-        
-        self.future = self.landing_client.send_goal_async(goal_msg)
-        self.future.add_done_callback(self.goal_response_callback)
-        self.action_client = self.landing_client
-
-    def send_fly_to_position_action_request(self, target_pose):
-        print("Sending fly-to-position action request with target pose:", target_pose)
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "FlyToPosition"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        goal_msg = FlyToPosition.Goal()
-        goal_msg.target_pose = target_pose
-        
-        if not self.fly_to_position_client.wait_for_server(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-        
-        self.future = self.fly_to_position_client.send_goal_async(goal_msg)
-        self.future.add_done_callback(self.goal_response_callback)
-        self.action_client = self.fly_to_position_client
-
-    def send_fly_under_cable_action_request(self, cable_id, target_distance):
-        print("Sending fly-under-cable action request with cable id", cable_id, "and target distance", target_distance)
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "FlyUnderCable"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        goal_msg = FlyUnderCable.Goal()
-        goal_msg.target_cable_id = cable_id
-        goal_msg.target_cable_distance = target_distance
-        
-        if not self.fly_under_cable_client.wait_for_server(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-        
-        self.future = self.fly_under_cable_client.send_goal_async(goal_msg)
-        self.future.add_done_callback(self.goal_response_callback)
-        self.action_client = self.fly_under_cable_client
-
-    def send_cable_landing_action_request(self, target_cable_id):
-        print("Sending cable landing action request with target cable id:", target_cable_id)
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "CableLanding"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        goal_msg = CableLanding.Goal()
-        goal_msg.target_cable_id = target_cable_id
-        
-        if not self.cable_landing_client.wait_for_server(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-        
-        self.future = self.cable_landing_client.send_goal_async(goal_msg)
-        self.future.add_done_callback(self.goal_response_callback)
-        self.action_client = self.cable_landing_client
-
-    def send_cable_takeoff_action_request(self, target_cable_distance):
-        print("Sending cable takeoff action request with target cable distance:", target_cable_distance)
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "CableTakeoff"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        goal_msg = CableTakeoff.Goal()
-        goal_msg.target_cable_distance = target_cable_distance
-        
-        if not self.cable_takeoff_client.wait_for_server(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-        
-        self.future = self.cable_takeoff_client.send_goal_async(goal_msg)
-        self.future.add_done_callback(self.goal_response_callback)
-        self.action_client = self.cable_takeoff_client
-
-    def send_disarm_on_cable_action_request(self):
-        print("Sending disarm on cable action request")
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "DisarmOnCable"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        goal_msg = DisarmOnCable.Goal()
-        
-        if not self.disarm_on_cable_client.wait_for_server(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-        
-        self.future = self.disarm_on_cable_client.send_goal_async(goal_msg)
-        self.future.add_done_callback(self.goal_response_callback)
-        self.action_client = self.disarm_on_cable_client
-
-    def send_arm_on_cable_action_request(self):
-        print("Sending arm on cable action request")
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "ArmOnCable"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        goal_msg = ArmOnCable.Goal()
-        
-        if not self.arm_on_cable_client.wait_for_server(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-        
-        self.future = self.arm_on_cable_client.send_goal_async(goal_msg)
-        self.future.add_done_callback(self.goal_response_callback)
-        self.action_client = self.arm_on_cable_client
-
-    def goal_response_callback(self, future):
-        self.goal_handle = future.result()
-        self.action_status_lock_.acquire(blocking=True)
-        if not self.goal_handle.accepted:
-            self.action_status = "Cancelled"
-            self.action_status_lock_.release()
-            return
-
-        self.action_status = "Executing"
-        self.action_status_lock_.release()
-
-        self.future = self.goal_handle.get_result_async()
-        self.future.add_done_callback(self.get_result_callback)
-
-    def get_result_callback(self, future):
-        res = future.result()
-        
-        self.action_status_lock_.acquire(blocking=True)
-        if res is None or not res.result.success:
-            self.action_status = "Cancelled"
-            self.action_status_lock_.release()
-            return
-
-        self.action_status = "Success"
-        self.action_status_lock_.release()
 
     def send_open_gripper_command(self):
         print("Sending open gripper command")
@@ -719,142 +490,6 @@ class IIIGCNode(Node):
                 self.action_status = "Success"
                 self.action_status_lock_.release()
 
-    def set_target_cable_id(self, cable_id):
-        print("Setting target cable id: " + str(cable_id))
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "SetTargetCableId"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        if not self.set_target_cable_id_srv_client.wait_for_service(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-
-        req = SetTargetCableId.Request()
-        req.target_cable_id = cable_id
-
-        future = self.set_target_cable_id_srv_client.call_async(req)
-        future.add_done_callback(self.set_target_cable_id_response_callback)
-
-    def set_target_cable_id_response_callback(self, future: rclpy.Future):
-        response: SetTargetCableId.Response = future.result()
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.action_status = "Success"
-            self.action_status_lock_.release()
-
-    def initiate_charging(self):
-        print("Initiating charging")
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "InitiateCharging"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        if not self.initiate_charging_srv_client.wait_for_service(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-
-        req = InitiateCharging.Request()
-
-        future = self.initiate_charging_srv_client.call_async(req)
-        future.add_done_callback(self.initiate_charging_response_callback)
-
-    def initiate_charging_response_callback(self, future: rclpy.Future):
-        response: InitiateCharging.Response = future.result()
-
-        if self.action_status_lock_.acquire(blocking=True):
-            if response.success:
-                self.action_status = "Success"
-            else:
-                self.action_status = "Cancelled"
-                
-            self.action_status_lock_.release()
-
-    def interrupt_charging(self):
-        print("Interrupting charging")
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "InterruptCharging"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        if not self.interrupt_charging_srv_client.wait_for_service(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-
-        req = InterruptCharging.Request()
-
-        future = self.interrupt_charging_srv_client.call_async(req)
-        future.add_done_callback(self.interrupt_charging_response_callback)
-
-    def interrupt_charging_response_callback(self, future: rclpy.Future):
-        response: InterruptCharging.Response = future.result()
-
-        if self.action_status_lock_.acquire(blocking=True):
-            if response.success:
-                self.action_status = "Success"
-            else:
-                self.action_status = "Cancelled"
-                
-            self.action_status_lock_.release()
-
-    def prolong_charging_until_interrupted(self):
-        print("Prolonging charging until interrupted")
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "ProlongCharging"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        if not self.prolong_charging_srv_client.wait_for_service(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-
-        req = ProlongCharging.Request()
-        req.prolong_mode = ProlongCharging.Request.PROLONG_MODE_UNTIL_INTERRUPTED
-
-        future = self.prolong_charging_srv_client.call_async(req)
-        future.add_done_callback(self.prolong_charging_response_callback)
-
-    def prolong_charging_clear(self):
-        print("Prolonging charging clear")
-
-        if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "ProlongCharging"
-            self.action_status = "Waiting for reply"
-            self.action_status_lock_.release()
-
-        if not self.prolong_charging_srv_client.wait_for_service(timeout_sec=1.0):
-            if self.action_status_lock_.acquire(blocking=True):
-                self.action_status = "Cancelled"
-                self.action_status_lock_.release()
-
-        req = ProlongCharging.Request()
-        req.prolong_mode = ProlongCharging.Request.PROLONG_MODE_CLEAR
-
-        future = self.prolong_charging_srv_client.call_async(req)
-        future.add_done_callback(self.prolong_charging_response_callback)
-
-    def prolong_charging_response_callback(self, future: rclpy.Future):
-        response: ProlongCharging.Response = future.result()
-
-        if self.action_status_lock_.acquire(blocking=True):
-            if response.success:
-                self.action_status = "Success"
-            else:
-                self.action_status = "Cancelled"
-                
-            self.action_status_lock_.release()
-
-    def cancel_action(self):
-        self.action_client._cancel_goal(self.goal_handle)
-        
     def get_parameter_yaml(self) -> str:
         print("Getting parameter yaml")
 

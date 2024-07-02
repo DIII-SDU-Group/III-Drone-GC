@@ -668,9 +668,6 @@ class IIIGCNode(Node):
 
         gripper_status = self.get_gripper_status()
 
-        if gripper_status.gripper_status != GripperStatus.GRIPPER_STATUS_CLOSED:
-            return
-        
         if not self.gripper_command_srv_client.wait_for_service(timeout_sec=1.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
@@ -694,9 +691,6 @@ class IIIGCNode(Node):
 
         gripper_status = self.get_gripper_status()
 
-        if gripper_status.gripper_status != GripperStatus.GRIPPER_STATUS_OPEN:
-            return
-        
         if not self.gripper_command_srv_client.wait_for_service(timeout_sec=1.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"

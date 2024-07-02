@@ -1167,20 +1167,14 @@ class IIIGui():
         gripper_status: GripperStatus = self.node.get_gripper_status()
 
         # OpenGripper:
-        if self.current_action == "OpenGripper" or self.action_status == "Executing":
+        if self.action_status == "Executing":
             self.open_gripper_button.config(state="disabled")
 
-        elif gripper_status.gripper_status != GripperStatus.GRIPPER_STATUS_CLOSED:
-            self.open_gripper_button.config(state="disabled")
-        
         else:
             self.open_gripper_button.config(state="normal")
 
         # CloseGripper:
-        if self.current_action == "CloseGripper" or self.action_status == "Executing":
-            self.close_gripper_button.config(state="disabled")
-
-        elif gripper_status.gripper_status != GripperStatus.GRIPPER_STATUS_OPEN:
+        if self.action_status == "Executing":
             self.close_gripper_button.config(state="disabled")
 
         else:
@@ -2131,14 +2125,14 @@ class IIIGui():
     def put_battery_voltage(self):
         voltage = self.node.get_battery_voltage()
 
-        self.battery_voltage_value_label.configure(text=str(voltage))
+        self.battery_voltage_value_label.configure(text=".2f".format(voltage))
 
         self.battery_voltage_value_label.after(100, self.put_battery_voltage)
 
     def put_charging_power(self):
         power = self.node.get_charging_power()
 
-        self.charging_power_value_label.configure(text=str(power))
+        self.charging_power_value_label.configure(text=".2f".format(power))
 
         self.charging_power_value_label.after(100, self.put_charging_power)
 

@@ -668,7 +668,7 @@ class IIIGCNode(Node):
 
         gripper_status = self.get_gripper_status()
 
-        if not self.gripper_command_srv_client.wait_for_service(timeout_sec=1.0):
+        if not self.gripper_command_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
                 self.action_status_lock_.release()
@@ -691,7 +691,7 @@ class IIIGCNode(Node):
 
         gripper_status = self.get_gripper_status()
 
-        if not self.gripper_command_srv_client.wait_for_service(timeout_sec=1.0):
+        if not self.gripper_command_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
                 self.action_status_lock_.release()
@@ -723,7 +723,7 @@ class IIIGCNode(Node):
             self.action_status = "Waiting for reply"
             self.action_status_lock_.release()
             
-        if not self.pl_mapper_command_srv_client.wait_for_service(timeout_sec=1.0):
+        if not self.pl_mapper_command_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
                 self.action_status_lock_.release()
@@ -743,7 +743,7 @@ class IIIGCNode(Node):
             self.action_status = "Waiting for reply"
             self.action_status_lock_.release()
             
-        if not self.pl_mapper_command_srv_client.wait_for_service(timeout_sec=1.0):
+        if not self.pl_mapper_command_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
                 self.action_status_lock_.release()
@@ -763,7 +763,7 @@ class IIIGCNode(Node):
             self.action_status = "Waiting for reply"
             self.action_status_lock_.release()
             
-        if not self.pl_mapper_command_srv_client.wait_for_service(timeout_sec=1.0):
+        if not self.pl_mapper_command_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
                 self.action_status_lock_.release()
@@ -783,7 +783,7 @@ class IIIGCNode(Node):
             self.action_status = "Waiting for reply"
             self.action_status_lock_.release()
             
-        if not self.pl_mapper_command_srv_client.wait_for_service(timeout_sec=1.0):
+        if not self.pl_mapper_command_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
                 self.action_status_lock_.release()
@@ -816,7 +816,7 @@ class IIIGCNode(Node):
             self.action_status = "Waiting for reply"
             self.action_status_lock_.release()
             
-        if not self.update_powerline_overview_srv_client.wait_for_service(timeout_sec=1.0):
+        if not self.update_powerline_overview_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
                 self.action_status_lock_.release()

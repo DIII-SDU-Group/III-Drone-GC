@@ -2125,14 +2125,14 @@ class IIIGui():
     def put_battery_voltage(self):
         voltage = self.node.get_battery_voltage()
 
-        self.battery_voltage_value_label.configure(text=".2f".format(voltage))
+        self.battery_voltage_value_label.configure(text="{:.2f}".format(voltage))
 
         self.battery_voltage_value_label.after(100, self.put_battery_voltage)
 
     def put_charging_power(self):
         power = self.node.get_charging_power()
 
-        self.charging_power_value_label.configure(text=".2f".format(power))
+        self.charging_power_value_label.configure(text="{:.2f}".format(power))
 
         self.charging_power_value_label.after(100, self.put_charging_power)
 

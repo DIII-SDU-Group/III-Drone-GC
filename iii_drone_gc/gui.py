@@ -2232,7 +2232,8 @@ class IIIGui():
             for i, txt in enumerate(points_id):
                 ax.annotate(txt, (points_y[i], points_z[i]))
 
-
+            ax.scatter(0, 0, linewidth=0.000001, color='green', label='Drone', marker='X')
+            ax.annotate("Drone", (0, 0))
 
             target = self.node.get_target()
             if target is not None: # and (target[0]**2 + target[1]**2 + target[2]**2)**0.5 > 0.1:
@@ -2254,8 +2255,15 @@ class IIIGui():
 
             plt.axis('square')
 
+            points_y_plus_drone = points_y + [0]
+
             if (len(points_y)>0):
-                plt.xlim([min([min(points_y)-2,-2]), max([max(points_y)+2, 2])])
+                plt.xlim([min([min(points_y_plus_drone)-2,-2]), max([max(points_y_plus_drone)+2, 2])])
+
+            points_z_plus_drone = points_z + [0]
+
+            if (len(points_z)>0):
+                plt.ylim([min([min(points_z_plus_drone)-2,-0.5]), max([max(points_z_plus_drone)+2, 2])])
 
 
             fig.canvas.draw()

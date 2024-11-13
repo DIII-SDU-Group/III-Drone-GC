@@ -2236,10 +2236,13 @@ class IIIGui():
             ax.annotate("Drone", (0, 0))
 
             target = self.node.get_target()
-            if target is not None: # and (target[0]**2 + target[1]**2 + target[2]**2)**0.5 > 0.1:
-                target = np.matmul(rotm, target)
-                ax.scatter(target[1], target[2], linewidth=0.000001, color='blue', label='Target', marker='X')
-                ax.annotate("Target", (target[1], target[2]))
+            try:
+                if target is not None: # and (target[0]**2 + target[1]**2 + target[2]**2)**0.5 > 0.1:
+                    target = np.matmul(rotm, target)
+                    ax.scatter(target[1], target[2], linewidth=0.000001, color='blue', label='Target', marker='X')
+                    ax.annotate("Target", (target[1], target[2]))
+            except:
+                pass
 
 
             traj = self.node.get_trajectory()

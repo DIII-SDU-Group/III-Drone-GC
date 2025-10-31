@@ -16,12 +16,12 @@ from nav_msgs.msg import Path
 
 ###############################################################################
 # Custom modules:
-from iii_gc.math import *
-from iii_gc.gc_node import IIIGCNode
+from iii_drone_gc.math import *
+from iii_drone_gc.gc_node import IIIGCNode
 
 ###############################################################################
 # Custom interfaces:
-from iii_interfaces.msg import GripperStatus, ChargerOperatingMode, ChargerStatus
+from iii_drone_interfaces.msg import GripperStatus, ChargerOperatingMode, ChargerStatus
 
 ###############################################################################
 # Libraries:
@@ -100,16 +100,11 @@ class IIIGui():
         self.diagnostics_frame.grid(row=0, column=0)
 
             # Powerline visualization:
-        # Container Frame for PL Visualization and Title
-        self.pl_viz_container_frame = tkinter.Frame(self.diagnostics_frame, bg="#007BFF")
-        self.pl_viz_container_frame.grid(row=0, column=0, sticky="n")  # Stick to the north to limit size
-        self.diagnostics_frame.grid_rowconfigure(1, weight=1)
-        self.pl_viz_title = tkinter.Label(self.pl_viz_container_frame, text="Perceived Powerlines", font=("Arial", 16, "bold"), bg="#007BFF", relief="solid", borderwidth=1)
-        self.pl_viz_title.grid(row=0, column=0, sticky="new")
-        self.pl_viz_frame = tkinter.Frame(self.pl_viz_container_frame, bg="#007BFF", width=400, height=300, bd=2, relief="solid")
-        self.pl_viz_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.pl_viz_frame = tkinter.Frame(self.diagnostics_frame, bg="white")
+        self.pl_viz_frame.grid(row=0, column=0)
+
         self.label_viz = tkinter.Label(self.pl_viz_frame)
-        self.label_viz.grid(row=0, column=0, sticky="nsew")
+        self.label_viz.grid()
 
         self.put_img()
 
@@ -745,41 +740,6 @@ class IIIGui():
 
         self.interrupt_charging_button.grid(row=2, column=0, pady=10)
 
-        # Prolong charging:
-        self.prolong_charging_button = tkinter.Button(
-            self.high_level_action_view_frame,
-            text="Prolong charging",
-            command=self.execute_prolong_charging,
-            bg=normal_button_bg,
-            fg=normal_button_fg,
-            font=buttons_font,
-        )
-
-        self.prolong_charging_button.grid(row=3, column=0, pady=10)
-
-        self.prolong_charging_parameters_frame = tkinter.Frame(self.high_level_action_view_frame, bg="#000000")
-        self.prolong_charging_parameters_frame.grid(row=3, column=1)
-
-        self.prolong_charging_mode_label = tkinter.Label(
-            self.prolong_charging_parameters_frame,
-            text="Prolong charging mode: ",
-            font=text_font
-        )
-        self.prolong_charging_mode_label.grid(row=0, column=0)
-
-        self.prolong_charging_modes = ["Until interrupted", "Clear"]
-        self.prolong_charging_mode_stringvar = tkinter.StringVar(self.high_level_action_view_frame)
-        self.prolong_charging_mode_stringvar.set(self.prolong_charging_modes[0])
-        self.prolong_charging_mode_optionmenu = tkinter.OptionMenu(
-            self.prolong_charging_parameters_frame,
-            self.prolong_charging_mode_stringvar,
-            *self.prolong_charging_modes,
-        )
-        self.prolong_charging_mode_optionmenu.config(font=text_font)
-        self.prolong_charging_mode_optionmenu_menu = self.root.nametowidget(self.prolong_charging_mode_optionmenu.menuname)
-        self.prolong_charging_mode_optionmenu_menu.config(font=text_font)
-        self.prolong_charging_mode_optionmenu.grid(row=0, column=1)
-
         # Put action view:
         self.on_low_level_action_view_select()
 
@@ -948,17 +908,8 @@ class IIIGui():
         else:
             self.interrupt_charging_button.config(state="normal")
 
-        # ProlongCharging:
-        if cont_mission_orch_state != "charging" or self.action_status == "Executing":
-            self.prolong_charging_button.config(state="disabled")
-            self.prolong_charging_mode_optionmenu.config(state="disabled")
-        
-        else:
-            self.prolong_charging_button.config(state="normal")
-            self.prolong_charging_mode_optionmenu.config(state="normal")
+        self.root.after(100, self.update_available_actions)
 
-        if not self.end:
-            self.root.after(100, self.update_available_actions)
 
     def on_gripper_action_view_select(self):
         self.low_level_action_view_frame.grid_forget()
@@ -1149,14 +1100,6 @@ class IIIGui():
     def execute_interrupt_charging(self):
         self.node.interrupt_charging()
 
-    def execute_prolong_charging(self):
-        mode = self.prolong_charging_mode_stringvar.get()
-
-        if mode == "Until interrupted":
-            self.node.prolong_charging_until_interrupted()
-        elif mode == "Clear":
-            self.node.prolong_charging_clear()
-
     def update_target_cable_id_optionmenu(self):
         old_cable_ids = self.cable_ids
         self.cable_ids = self.node.get_cable_ids()
@@ -1166,8 +1109,7 @@ class IIIGui():
         for cable_id in self.cable_ids:
             self.fly_under_cable_target_cable_id_optionmenu["menu"].add_command(label=cable_id, command=lambda value=cable_id: self.fly_under_cable_target_cable_id_stringvar.set(value))
 
-        if not self.end:
-            self.root.after(1000, self.update_target_cable_id_optionmenu)
+        self.root.after(1000, self.update_target_cable_id_optionmenu)
 
     def update_set_target_cable_id_optionmenu(self):
         old_cable_ids = self.cable_ids
@@ -1179,8 +1121,7 @@ class IIIGui():
         for cable_id in self.cable_ids:
             self.set_target_cable_id_optionmenu["menu"].add_command(label=cable_id, command=lambda value=cable_id: self.set_target_cable_id_stringvar.set(value))
 
-        if not self.end:
-            self.root.after(1000, self.update_set_target_cable_id_optionmenu)
+        self.root.after(1000, self.update_set_target_cable_id_optionmenu)
 
     def main_loop(self):
         try:
@@ -2014,8 +1955,7 @@ class IIIGui():
         status = "open" if self.node.get_gripper_status().gripper_status == GripperStatus.GRIPPER_STATUS_OPEN else "closed"
         self.gripper_status_value_label.configure(text=status)
 
-        if not self.end:
-            self.root.after(100, self.put_gripper_status)
+        self.root.after(100, self.put_gripper_status)
 
     def put_cont_mission_orch_state(self):
         state = self.node.get_cont_mission_orch_state()

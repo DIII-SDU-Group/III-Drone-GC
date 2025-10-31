@@ -1,21 +1,25 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>iii_gc</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="ffn@mmmi.sdu.dk">ffn</maintainer>
-  <license>TODO: License declaration</license>
+  <name>iii_drone_gc</name>
+  <version>2.2.0</version>
+  <description>
+    The iii_drone_gc package. This package contains the ground control functionality of the III-Drone system.
+  </description>
+  <maintainer email="ffn@sdu.dk">ffn</maintainer>
+  <license>Proprietary</license>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
-  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>iii_drone_core</exec_depend>
+  <exec_depend>iii_drone_interfaces</exec_depend>
 
-  <depend>rclpy</depend>
-
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <export>
-    <build_type>ament_cmake</build_type>
+    <build_type>ament_python</build_type>
   </export>
+
 </package>

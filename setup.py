@@ -16,12 +16,10 @@ setup(
     packages=[package_name],
     # Files we want to install, specifically launch files
     data_files=[
-        # # Install marker file in the package index
-        # ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
-        # Include our package.xml file
+        # Install marker file in the package index
+        ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
+        # Include package metadata
         (os.path.join('share', package_name), ['package.xml']),
-        # # Include all launch files.
-        # (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*.launch.py'))),
     ],
     # This is important as well
     install_requires=['setuptools'],
@@ -38,4 +36,3 @@ setup(
         ]
     }
 )
-

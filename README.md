@@ -1,36 +1,53 @@
-# III-GC
-Graphical user interface for UAV ground control
+# III-Drone-GC
 
-## Compatibility
-This version is compatible with
-- `ROS2 Humble`
-- [`PX4-Autopilot` DIII fork tag `v1.14.0-rc2`](https://github.com/DIII-SDU-Group/PX4-Autopilot/tree/v1.14.0-rc2)
-- [`px4_msgs` DIII fork tag `v1.14`](https://github.com/DIII-SDU-Group/px4_msgs/tree/v1.14)
-- [`micro-ROS-agent` DIII fork tag `III-Drone-v2.2`](https://github.com/DIII-SDU-Group/micro-ROS-Agent/tree/III-Drone-v2.2)
-- [`micro_ros_msgs` DIII fork tag `III-Drone-v2.2`](https://github.com/DIII-SDU-Group/micro_ros_msgs/tree/III-Drone-v2.2)
-- [`III-Drone-Core` v2.2](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging)
-- [`III-Drone-Interfaces` v2.2](https://github.com/DIII-SDU-Group/III-Drone-Interfaces/tree/v2.2-staging)
+`iii_drone_gc` contains the Python-based ground-control tooling for the III system. It combines a ROS node that aggregates operator-facing state with GUI code that presents diagnostics and invokes high-level system actions.
 
-See [`III-Drone-Core`](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging) for more information.
+## Package Role
 
-## Installation and build
-Follow the installation and build guide from [III-Drone-Core](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging). For simulation, follow the guide from [III-Drone-Simulation](https://github.com/DIII-SDU-Group/III-Drone-Simulation/tree/v2.2-staging).
+This package provides:
 
-## Launching the ground control GUI
-After build and installation, run the simulation (steps in the `III-Drone-Simulation` package):
+- a ROS node that subscribes to system status, target, trajectory, charging, and perception topics
+- service/action helpers for operator commands such as gripper control and mapper interaction
+- a Tk-based GUI implementation used for operator workflows
+
+## Module Map
+
+### Runtime Modules
+
+- `gc_node.py`: operator-facing aggregation node; centralizes subscriptions, service clients, callbacks, and helper getters
+- `gui.py`: current GUI implementation built around `IIIGCNode`
+- `gui_original.py`: legacy GUI implementation kept for reference during ongoing refactoring
+
+## Data Flow
+
+`IIIGCNode` is the stable center of the package:
+
+- it caches ROS topic state behind locks
+- exposes high-level getters for GUI consumption
+- wraps configuration and command services behind simpler Python methods
+- tracks the status of asynchronous operator actions
+
+The GUI layer should stay thin and rely on `IIIGCNode` instead of duplicating ROS logic.
+
+## Tests
+
+The current tests cover:
+
+- combined-drone-awareness helper behavior
+- maneuver type/status translation
+- parameter event forwarding
+- status getter defaults and update callbacks
+- powerline extraction behavior
+- gripper and PL-mapper command/response logic
+
+Typical package-only commands:
+
+```bash
+python3 -m pytest src/III-Drone-GC/test -q
 ```
-cd <PX4-Autopilot-dir>
-PX4_NO_FOLLOW_MODE=1 make px4_sitl gazebo-classic_d4s_dc_drone__hca_full_pylon_setup
-```
-In a new terminal, launch the III-Drone system:
-```
-cd <ros2-ws>
-source install/setup.sh
-ros2 launch iii_drone_core iii_drone.launch.py
-```
-Finally, in a new terminal, the ground control GUI is launched as follows:
-```
-cd <ROS2-DIII-workspace>
-source install/setup.sh
-ros2 run iii_drone_gc gui.py --ros-args --params-file src/III-Drone-GC/config/params.yaml
-```
+
+## Extension Guidelines
+
+- put ROS subscriptions, services, and action state in `gc_node.py`
+- keep GUI files focused on presentation and user interaction
+- when adding a new operator-visible status or command, add both a helper method and a focused logic test

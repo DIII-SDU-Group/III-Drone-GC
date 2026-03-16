@@ -23,6 +23,7 @@ setup(
     ],
     # This is important as well
     install_requires=['setuptools'],
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer=maintainer,
     maintainer_email=maintainer_email,

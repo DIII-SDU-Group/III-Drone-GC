@@ -1,5 +1,12 @@
 #!/usr/bin/python3
 
+"""Legacy III ground-control GUI implementation.
+
+This module is retained as a reference while the newer GUI code evolves. It is
+not the preferred entry point for new work, but it still documents older UI
+assumptions and operator workflows.
+"""
+
 ###############################################################################
 # Imports
 ###############################################################################

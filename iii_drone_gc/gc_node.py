@@ -1,3 +1,10 @@
+"""Ground-control ROS node for aggregating operator-facing system state.
+
+`IIIGCNode` subscribes to status, target, trajectory, perception, and payload
+topics, exposes higher-level getters for GUI code, and wraps service-based
+operator commands behind simpler Python methods.
+"""
+
 ###############################################################################
 # Imports
 ###############################################################################

@@ -1,5 +1,12 @@
 #!/usr/bin/python3
 
+"""Current Tk-based ground-control GUI for the III system.
+
+The GUI is intentionally built on top of `IIIGCNode`, which owns ROS state and
+command plumbing. This module focuses on presentation, operator workflows, and
+parameter editing interactions.
+"""
+
 ###############################################################################
 # Imports
 ###############################################################################

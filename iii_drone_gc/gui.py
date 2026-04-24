@@ -2302,8 +2302,6 @@ class IIIGui():
         param_name: str,
         param_value: ParameterValue
     ):
-        if param_name == "default_parameter_file":
-            return
         try:
             param_dict = self.parameter_handler.get_param(param_name)
             

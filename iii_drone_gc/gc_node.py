@@ -42,12 +42,16 @@ from iii_drone_interfaces.msg import (
     
 )
 from iii_drone_interfaces.srv import GripperCommand
-from iii_drone_interfaces.srv import PLMapperCommand, UpdatePowerlineOverview
+from iii_drone_interfaces.srv import PLMapperCommand, UpdatePowerlineOverview, OverrideMissionSpecification
 from iii_drone_interfaces.srv import GetParameterYaml, GetDeclaredParameters, SaveParameters, GetParameterFiles, LoadParameters, SetParameterFromGC, GetCurrentParameterFile
 
 ###############################################################################
 # Custom modules:
 from iii_drone_core.utils.math import *
+try:
+    from iii_drone_mission.operations_client import OperationsClient
+except ModuleNotFoundError:
+    OperationsClient = None
 
 ###############################################################################
 # Libraries:
@@ -150,6 +154,11 @@ class IIIGCNode(Node):
         self.pl_mapper_command_srv_client = self.create_client(PLMapperCommand, "/perception/pl_mapper/pl_mapper_command")
 
         self.update_powerline_overview_srv_client = self.create_client(UpdatePowerlineOverview, "/mission/powerline_overview_provider/update_powerline_overview")
+        self.override_mission_specification_srv_client = self.create_client(
+            OverrideMissionSpecification,
+            "/mission/mission_executor/override_mission_specification",
+        )
+        self.operations_client = OperationsClient(self) if OperationsClient is not None else None
 
         self.get_parameter_yaml_srv_client = self.create_client(GetParameterYaml, "/configuration/configuration_server/get_parameter_yaml")
         self.get_declared_parameters_srv_client = self.create_client(GetDeclaredParameters, "/configuration/configuration_server/get_declared_parameters")
@@ -665,6 +674,130 @@ class IIIGCNode(Node):
             
             return cur, status
 
+    def _set_action_status(self, current_action: str, action_status: str):
+        if self.action_status_lock_.acquire(blocking=True):
+            self.current_action = current_action
+            self.action_status = action_status
+            self.action_status_lock_.release()
+
+    def send_custom_operation_fly_to_position(
+        self,
+        frame_id: str,
+        x: float,
+        y: float,
+        z: float,
+        yaw: float,
+        timeout_sec: float | None = None,
+    ):
+        if self.operations_client is None:
+            raise RuntimeError("iii_drone_mission OperationsClient is unavailable")
+        self._set_action_status("CustomOperation/FlyToPosition", "Executing")
+        result = self.operations_client.fly_to_position(
+            frame_id=frame_id,
+            x=x,
+            y=y,
+            z=z,
+            yaw=yaw,
+            timeout_sec=timeout_sec,
+        )
+        self._set_action_status(
+            "CustomOperation/FlyToPosition",
+            "Succeeded" if result.success else f"Failed: {result.message}",
+        )
+        return result
+
+    def send_custom_operation_cable_aware_fly_to_position(
+        self,
+        frame_id: str,
+        x: float,
+        y: float,
+        z: float,
+        yaw: float,
+        timeout_sec: float | None = None,
+    ):
+        if self.operations_client is None:
+            raise RuntimeError("iii_drone_mission OperationsClient is unavailable")
+        self._set_action_status("CustomOperation/CableAwareFlyToPosition", "Executing")
+        result = self.operations_client.cable_aware_fly_to_position(
+            frame_id=frame_id,
+            x=x,
+            y=y,
+            z=z,
+            yaw=yaw,
+            timeout_sec=timeout_sec,
+        )
+        self._set_action_status(
+            "CustomOperation/CableAwareFlyToPosition",
+            "Succeeded" if result.success else f"Failed: {result.message}",
+        )
+        return result
+
+    def send_custom_operation_hover(
+        self,
+        duration_s: float,
+        sustain_duration_s: float = 0.0,
+        sustain_action: bool = False,
+        timeout_sec: float | None = None,
+    ):
+        if self.operations_client is None:
+            raise RuntimeError("iii_drone_mission OperationsClient is unavailable")
+        self._set_action_status("CustomOperation/Hover", "Executing")
+        result = self.operations_client.hover(
+            duration_s=duration_s,
+            sustain_duration_s=sustain_duration_s,
+            sustain_action=sustain_action,
+            timeout_sec=timeout_sec,
+        )
+        self._set_action_status(
+            "CustomOperation/Hover",
+            "Succeeded" if result.success else f"Failed: {result.message}",
+        )
+        return result
+
+    def send_custom_operation_cable_takeoff(
+        self,
+        target_cable_id: int,
+        target_cable_distance: float,
+        timeout_sec: float | None = None,
+    ):
+        if self.operations_client is None:
+            raise RuntimeError("iii_drone_mission OperationsClient is unavailable")
+        self._set_action_status("CustomOperation/CableTakeoff", "Executing")
+        result = self.operations_client.cable_takeoff(
+            target_cable_id=target_cable_id,
+            target_cable_distance=target_cable_distance,
+            timeout_sec=timeout_sec,
+        )
+        self._set_action_status(
+            "CustomOperation/CableTakeoff",
+            "Succeeded" if result.success else f"Failed: {result.message}",
+        )
+        return result
+
+    def send_custom_operation_cable_landing(self, target_cable_id: int, timeout_sec: float | None = None):
+        if self.operations_client is None:
+            raise RuntimeError("iii_drone_mission OperationsClient is unavailable")
+        self._set_action_status("CustomOperation/CableLanding", "Executing")
+        result = self.operations_client.cable_landing(
+            target_cable_id=target_cable_id,
+            timeout_sec=timeout_sec,
+        )
+        self._set_action_status(
+            "CustomOperation/CableLanding",
+            "Succeeded" if result.success else f"Failed: {result.message}",
+        )
+        return result
+
+    def send_custom_operation_cancel(self, timeout_sec: float | None = 2.0):
+        if self.operations_client is None:
+            raise RuntimeError("iii_drone_mission OperationsClient is unavailable")
+        cancelled = self.operations_client.cancel_active(timeout_sec=timeout_sec)
+        self._set_action_status(
+            "CustomOperation/Cancel",
+            "Cancelled" if cancelled else "No active local goal",
+        )
+        return cancelled
+
     def send_open_gripper_command(self):
         print("Sending open gripper command")
 
@@ -847,6 +980,37 @@ class IIIGCNode(Node):
         else:
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Failed"
+                self.action_status_lock_.release()
+
+    def send_override_mission_specification_command(self, mission_specification_file: str = "", use_default: bool = False):
+        if self.action_status_lock_.acquire(blocking=True):
+            self.current_action = "OverrideMissionSpecification"
+            self.action_status = "Waiting for reply"
+            self.action_status_lock_.release()
+
+        if not self.override_mission_specification_srv_client.wait_for_service(timeout_sec=5.0):
+            if self.action_status_lock_.acquire(blocking=True):
+                self.action_status = "Cancelled"
+                self.action_status_lock_.release()
+            return
+
+        request = OverrideMissionSpecification.Request()
+        request.mission_specification_file = mission_specification_file
+        request.use_default = use_default
+
+        future = self.override_mission_specification_srv_client.call_async(request)
+        future.add_done_callback(self.override_mission_specification_response_callback)
+
+    def override_mission_specification_response_callback(self, future: rclpy.Future):
+        response: OverrideMissionSpecification.Response = future.result()
+
+        if response.success:
+            if self.action_status_lock_.acquire(blocking=True):
+                self.action_status = "Success"
+                self.action_status_lock_.release()
+        else:
+            if self.action_status_lock_.acquire(blocking=True):
+                self.action_status = f"Failed: {response.message}"
                 self.action_status_lock_.release()
 
     def get_parameter_yaml(self) -> str:

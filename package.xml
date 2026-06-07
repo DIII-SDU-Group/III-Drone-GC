@@ -9,9 +9,13 @@
   <maintainer email="ffn@sdu.dk">ffn</maintainer>
   <license>Proprietary</license>
 
-  <exec_depend>rclpy</exec_depend>
-  <exec_depend>iii_drone_core</exec_depend>
-  <exec_depend>iii_drone_interfaces</exec_depend>
+  <exec_depend>iii_drone_contracts</exec_depend>
+  <exec_depend>python3-fastapi</exec_depend>
+  <exec_depend>python3-httpx</exec_depend>
+  <exec_depend>python3-pydantic</exec_depend>
+  <exec_depend>python3-uvicorn</exec_depend>
+  <exec_depend>python3-websockets</exec_depend>
+  <exec_depend>python3-zeroconf</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

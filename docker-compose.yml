@@ -1,0 +1,23 @@
+services:
+  proxy:
+    build:
+      context: ../..
+      dockerfile: src/III-Drone-GC/docker/proxy.Dockerfile
+    network_mode: host
+    environment:
+      III_GC_PROXY_HOST: 0.0.0.0
+      III_GC_PROXY_PORT: "${III_GC_PROXY_PORT:-8780}"
+      III_GC_PROXY_CORS_ORIGINS: ${III_GC_PROXY_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: src/III-Drone-GC/frontend/Dockerfile
+      args:
+        VITE_GC_PROXY_URL: ${III_GC_PROXY_PUBLIC_URL:-http://localhost:8780}
+    ports:
+      - "${III_GC_FRONTEND_PORT:-5173}:80"
+    depends_on:
+      - proxy
+    restart: unless-stopped

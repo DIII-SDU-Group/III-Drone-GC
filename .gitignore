@@ -1,1 +1,3 @@
 **/__pycache__
+frontend/dist/
+frontend/node_modules/

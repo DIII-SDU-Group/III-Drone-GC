@@ -1,0 +1,110 @@
+import { useState } from "react";
+
+import { ToastRegion, type CommandResult, type ToastMessage } from "../components";
+import type { RuntimeCommandDispatcher } from "../api/commands";
+import type { CommandResponse } from "../generated/contracts";
+import type { RuntimeStoreState } from "../state";
+
+export function PayloadPage({
+  state,
+  dispatchCommand,
+}: {
+  state: RuntimeStoreState;
+  dispatchCommand: RuntimeCommandDispatcher;
+}) {
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const disabledReason = gripperDisabledReason(state);
+
+  async function run(commandId: string) {
+    try {
+      const response = await dispatchCommand(commandId);
+      const result = commandResponseToResult(response);
+      setToasts((current) => [...current, { ...result, autoDismissMs: response.accepted ? 2400 : undefined }]);
+    } catch (error) {
+      const result = errorToResult(commandId, error);
+      setToasts((current) => [...current, result]);
+    }
+  }
+
+  return (
+    <div className="workflow-page payload-page">
+      <section className="workflow-section">
+        <h3>Payload Status</h3>
+        <dl className="status-list">
+          <div>
+            <dt>Gripper</dt>
+            <dd>{state.domains.payload?.gripper_status ?? "unknown"}</dd>
+          </div>
+          <div>
+            <dt>Charger</dt>
+            <dd>{state.domains.payload?.charger_status ?? "unknown"}</dd>
+          </div>
+          <div>
+            <dt>Mode</dt>
+            <dd>{chargerMode(state)}</dd>
+          </div>
+          <div>
+            <dt>Battery</dt>
+            <dd>{state.domains.payload?.battery_voltage != null ? `${state.domains.payload.battery_voltage} V` : "unknown"}</dd>
+          </div>
+          <div>
+            <dt>Charging power</dt>
+            <dd>{state.domains.payload?.charging_power != null ? `${state.domains.payload.charging_power} W` : "unknown"}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="workflow-section">
+        <h3>Gripper Controls</h3>
+        {disabledReason ? <p className="control-reason">{disabledReason}</p> : null}
+        <div className="inline-actions">
+          <button type="button" disabled={Boolean(disabledReason)} onClick={() => void run("payload.gripper.open")}>
+            Open gripper
+          </button>
+          <button type="button" disabled={Boolean(disabledReason)} onClick={() => void run("payload.gripper.close")}>
+            Close gripper
+          </button>
+        </div>
+      </section>
+
+      <ToastRegion toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
+    </div>
+  );
+}
+
+function gripperDisabledReason(state: RuntimeStoreState): string | undefined {
+  if (state.connection.commands_disabled_reason) {
+    return state.connection.commands_disabled_reason;
+  }
+  if (state.domains.mission?.latest?.mission_active === true || state.domains.mission?.mission_state === "active") {
+    return "gripper commands are disabled in Mission mode";
+  }
+  if (state.domains.operation?.latest?.operation_active === true || state.domains.operation?.active_operation_id) {
+    return "gripper commands are disabled while a custom operation action is active";
+  }
+  return undefined;
+}
+
+function chargerMode(state: RuntimeStoreState): string {
+  const mode = state.domains.payload?.latest?.charger_operating_mode;
+  return typeof mode === "string" || typeof mode === "number" ? String(mode) : "unknown";
+}
+
+function commandResponseToResult(response: CommandResponse): CommandResult {
+  return {
+    id: response.request_id,
+    severity: response.accepted ? "success" : "danger",
+    title: response.accepted ? "Command accepted" : "Command rejected",
+    message: response.rejection?.message ?? response.message ?? response.command_id,
+    timestamp: response.timestamp,
+  };
+}
+
+function errorToResult(commandId: string, error: unknown): CommandResult {
+  return {
+    id: `${commandId}-error`,
+    severity: "danger",
+    title: "Command failed",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}

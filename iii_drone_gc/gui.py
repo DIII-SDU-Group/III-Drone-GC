@@ -658,6 +658,21 @@ class IIIGui():
         self.action_views["configuration"]["button"].config(state="normal")
         self.action_views["configuration"]["button"].grid(row=0, column=col_cnt)
 
+        col_cnt += 1
+
+        self.action_views["operations"] = {}
+
+        self.action_views["operations"]["button"] = tkinter.Button(
+            self.action_view_select_buttons_frame,
+            text="Operations",
+            command=self.on_operations_action_view_select,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        self.action_views["operations"]["button"].config(state="normal")
+        self.action_views["operations"]["button"].grid(row=0, column=col_cnt)
+
         self.current_action_view = "gripper"
 
         # Gripper control action view
@@ -906,6 +921,125 @@ class IIIGui():
         # self.prolong_charging_mode_optionmenu_menu.config(font=text_font)
         # self.prolong_charging_mode_optionmenu.grid(row=0, column=1)
         
+        # Custom operation action view:
+        self.action_views["operations"]["frame"] = tkinter.Frame(self.action_control_frame, bg="#000000")
+
+        row_cnt = 0
+
+        self.operations_label = tkinter.Label(
+            self.action_views["operations"]["frame"],
+            text="CustomOperation:",
+            bg="grey",
+            font=text_font
+        )
+        self.operations_label.grid(row=row_cnt, column=0, columnspan=4, sticky=tkinter.W+tkinter.E)
+
+        row_cnt += 1
+
+        self.operation_frame_id_var = tkinter.StringVar(value="world")
+        self.operation_x_var = tkinter.StringVar(value="0.0")
+        self.operation_y_var = tkinter.StringVar(value="0.0")
+        self.operation_z_var = tkinter.StringVar(value="1.0")
+        self.operation_yaw_var = tkinter.StringVar(value="0.0")
+
+        for col_cnt, label_text in enumerate(("Frame", "X", "Y", "Z", "Yaw")):
+            tkinter.Label(self.action_views["operations"]["frame"], text=label_text, font=text_font).grid(row=row_cnt, column=col_cnt)
+
+        row_cnt += 1
+
+        tkinter.Entry(self.action_views["operations"]["frame"], textvariable=self.operation_frame_id_var, width=10).grid(row=row_cnt, column=0)
+        tkinter.Entry(self.action_views["operations"]["frame"], textvariable=self.operation_x_var, validate="key", validatecommand=self.vcmd_numeric, width=8).grid(row=row_cnt, column=1)
+        tkinter.Entry(self.action_views["operations"]["frame"], textvariable=self.operation_y_var, validate="key", validatecommand=self.vcmd_numeric, width=8).grid(row=row_cnt, column=2)
+        tkinter.Entry(self.action_views["operations"]["frame"], textvariable=self.operation_z_var, validate="key", validatecommand=self.vcmd_numeric, width=8).grid(row=row_cnt, column=3)
+        tkinter.Entry(self.action_views["operations"]["frame"], textvariable=self.operation_yaw_var, validate="key", validatecommand=self.vcmd_numeric, width=8).grid(row=row_cnt, column=4)
+
+        row_cnt += 1
+
+        self.fly_to_position_button = tkinter.Button(
+            self.action_views["operations"]["frame"],
+            text="Fly to position",
+            command=self.execute_custom_operation_fly_to_position,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        self.fly_to_position_button.grid(row=row_cnt, column=0, columnspan=5, sticky=tkinter.W+tkinter.E, pady=10)
+
+        row_cnt += 1
+
+        self.cable_aware_fly_to_position_button = tkinter.Button(
+            self.action_views["operations"]["frame"],
+            text="Cable-aware fly to position",
+            command=self.execute_custom_operation_cable_aware_fly_to_position,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        self.cable_aware_fly_to_position_button.grid(row=row_cnt, column=0, columnspan=5, sticky=tkinter.W+tkinter.E, pady=10)
+
+        row_cnt += 1
+
+        self.operation_hover_duration_var = tkinter.StringVar(value="5.0")
+        self.operation_sustain_var = tkinter.BooleanVar(value=False)
+        tkinter.Label(self.action_views["operations"]["frame"], text="Hover duration (s):", font=text_font).grid(row=row_cnt, column=0, columnspan=2)
+        tkinter.Entry(self.action_views["operations"]["frame"], textvariable=self.operation_hover_duration_var, validate="key", validatecommand=self.vcmd_numeric, width=8).grid(row=row_cnt, column=2)
+        tkinter.Checkbutton(self.action_views["operations"]["frame"], text="Sustain", variable=self.operation_sustain_var).grid(row=row_cnt, column=3)
+
+        row_cnt += 1
+
+        self.hover_button = tkinter.Button(
+            self.action_views["operations"]["frame"],
+            text="Hover",
+            command=self.execute_custom_operation_hover,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        self.hover_button.grid(row=row_cnt, column=0, columnspan=5, sticky=tkinter.W+tkinter.E, pady=10)
+
+        row_cnt += 1
+
+        self.operation_cable_id_var = tkinter.StringVar(value="1")
+        self.operation_cable_distance_var = tkinter.StringVar(value="1.5")
+        tkinter.Label(self.action_views["operations"]["frame"], text="Cable ID:", font=text_font).grid(row=row_cnt, column=0)
+        tkinter.Entry(self.action_views["operations"]["frame"], textvariable=self.operation_cable_id_var, validate="key", validatecommand=self.vcmd_int, width=8).grid(row=row_cnt, column=1)
+        tkinter.Label(self.action_views["operations"]["frame"], text="Distance:", font=text_font).grid(row=row_cnt, column=2)
+        tkinter.Entry(self.action_views["operations"]["frame"], textvariable=self.operation_cable_distance_var, validate="key", validatecommand=self.vcmd_numeric, width=8).grid(row=row_cnt, column=3)
+
+        row_cnt += 1
+
+        self.cable_takeoff_button = tkinter.Button(
+            self.action_views["operations"]["frame"],
+            text="Cable takeoff",
+            command=self.execute_custom_operation_cable_takeoff,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        self.cable_takeoff_button.grid(row=row_cnt, column=0, columnspan=2, sticky=tkinter.W+tkinter.E, pady=10)
+
+        self.cable_landing_button = tkinter.Button(
+            self.action_views["operations"]["frame"],
+            text="Cable landing",
+            command=self.execute_custom_operation_cable_landing,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        self.cable_landing_button.grid(row=row_cnt, column=2, columnspan=3, sticky=tkinter.W+tkinter.E, pady=10)
+
+        row_cnt += 1
+
+        self.cancel_operation_button = tkinter.Button(
+            self.action_views["operations"]["frame"],
+            text="Cancel operation",
+            command=self.execute_custom_operation_cancel,
+            bg=normal_button_bg,
+            fg=normal_button_fg,
+            font=buttons_font,
+        )
+        self.cancel_operation_button.grid(row=row_cnt, column=0, columnspan=5, sticky=tkinter.W+tkinter.E, pady=10)
+
         # Configuration action view:
         self.action_views["configuration"]["frame"] = tkinter.Frame(self.action_control_frame, bg="#000000")
         
@@ -1193,6 +1327,11 @@ class IIIGui():
             self.pause_pl_mapper_button.config(state="disabled")
             self.freeze_pl_mapper_button.config(state="disabled")
             self.update_powerline_overview_button.config(state="disabled")
+            self.fly_to_position_button.config(state="disabled")
+            self.cable_aware_fly_to_position_button.config(state="disabled")
+            self.hover_button.config(state="disabled")
+            self.cable_takeoff_button.config(state="disabled")
+            self.cable_landing_button.config(state="disabled")
             
         else:
             cable_ids = self.node.get_cable_ids()
@@ -1206,6 +1345,11 @@ class IIIGui():
             self.stop_pl_mapper_button.config(state="normal")
             self.pause_pl_mapper_button.config(state="normal")
             self.freeze_pl_mapper_button.config(state="normal")
+            self.fly_to_position_button.config(state="normal")
+            self.cable_aware_fly_to_position_button.config(state="normal")
+            self.hover_button.config(state="normal")
+            self.cable_takeoff_button.config(state="normal")
+            self.cable_landing_button.config(state="normal")
 
         if not self.end:
             self.root.after(100, self.update_available_actions)
@@ -1237,6 +1381,15 @@ class IIIGui():
         
         self.action_views["configuration"]["frame"].grid(row=2, column=0, columnspan=2, sticky=tkinter.W+tkinter.E, pady=10)
 
+    def on_operations_action_view_select(self):
+        for key, value in self.action_views.items():
+            if key == "operations":
+                continue
+
+            value["frame"].grid_forget()
+
+        self.action_views["operations"]["frame"].grid(row=2, column=0, columnspan=2, sticky=tkinter.W+tkinter.E, pady=10)
+
     def execute_open_gripper(self):
         self.node.send_open_gripper_command()
 
@@ -1263,6 +1416,55 @@ class IIIGui():
     def execute_update_powerline_overview(self):
         timeout_s = int(self.update_powerline_overview_timeout_var.get())
         self.node.send_update_powerline_overview_command(timeout_s)
+
+    def _run_operation_thread(self, target):
+        Thread(target=target, daemon=True).start()
+
+    def execute_custom_operation_fly_to_position(self):
+        def run():
+            self.node.send_custom_operation_fly_to_position(
+                self.operation_frame_id_var.get(),
+                float(self.operation_x_var.get()),
+                float(self.operation_y_var.get()),
+                float(self.operation_z_var.get()),
+                float(self.operation_yaw_var.get()),
+            )
+        self._run_operation_thread(run)
+
+    def execute_custom_operation_cable_aware_fly_to_position(self):
+        def run():
+            self.node.send_custom_operation_cable_aware_fly_to_position(
+                self.operation_frame_id_var.get(),
+                float(self.operation_x_var.get()),
+                float(self.operation_y_var.get()),
+                float(self.operation_z_var.get()),
+                float(self.operation_yaw_var.get()),
+            )
+        self._run_operation_thread(run)
+
+    def execute_custom_operation_hover(self):
+        def run():
+            self.node.send_custom_operation_hover(
+                float(self.operation_hover_duration_var.get()),
+                sustain_action=self.operation_sustain_var.get(),
+            )
+        self._run_operation_thread(run)
+
+    def execute_custom_operation_cable_takeoff(self):
+        def run():
+            self.node.send_custom_operation_cable_takeoff(
+                int(self.operation_cable_id_var.get()),
+                float(self.operation_cable_distance_var.get()),
+            )
+        self._run_operation_thread(run)
+
+    def execute_custom_operation_cable_landing(self):
+        def run():
+            self.node.send_custom_operation_cable_landing(int(self.operation_cable_id_var.get()))
+        self._run_operation_thread(run)
+
+    def execute_custom_operation_cancel(self):
+        self.node.send_custom_operation_cancel()
 
     def main_loop(self):
         try:

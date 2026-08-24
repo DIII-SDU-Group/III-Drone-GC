@@ -74,6 +74,7 @@ for name in [
     "GripperCommand",
     "PLMapperCommand",
     "UpdatePowerlineOverview",
+    "OverrideMissionSpecification",
     "GetParameterYaml",
     "GetDeclaredParameters",
     "SaveParameters",

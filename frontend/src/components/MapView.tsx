@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import type { ConductorGeometry, MapProjection, MapState, Point2D, PolylineLayer, TargetState } from "../generated/contracts";
 import { DEFAULT_MAP_LAYERS, type MapLayerSettings } from "./mapTypes";
 
@@ -6,23 +8,36 @@ export function MapView({
   projection = mapState?.active_projection ?? "powerline_orthogonal",
   layers = DEFAULT_MAP_LAYERS,
   compact = false,
+  autoFit = true,
 }: {
   mapState?: MapState | null;
   projection?: MapProjection;
   layers?: MapLayerSettings;
   compact?: boolean;
+  autoFit?: boolean;
 }) {
-  const bounds = mapBounds(mapState);
+  const projectionState = projectState(mapState, projection);
+  const nextBounds = mapBounds(projectionState);
+  const boundsSnapshotKey = `${projection}:${autoFit ? "auto" : "manual"}`;
+  const [boundsSnapshot, setBoundsSnapshot] = useState({ key: boundsSnapshotKey, bounds: nextBounds });
+  if (boundsSnapshot.key !== boundsSnapshotKey) {
+    setBoundsSnapshot({ key: boundsSnapshotKey, bounds: nextBounds });
+  }
+  const bounds = autoFit || boundsSnapshot.key !== boundsSnapshotKey ? nextBounds : boundsSnapshot.bounds;
   const view = viewBox(bounds);
   const degradedReason = mapState?.degraded_reason ?? mapState?.frame?.degraded_reason ?? mapState?.frame?.reason;
+  const staleSources = mapStaleSources(projectionState);
   const noReference = !mapState || mapState.frame?.status === "missing" || mapState.source_availability === "unknown";
-  const storedConductors = layers.storedOverview ? availableConductors(mapState?.stored_overview_conductors) : [];
-  const liveConductors = layers.livePerception ? availableConductors(mapState?.live_conductors) : [];
-  const trajectory = layers.trajectory && availableLayer(mapState?.trajectory) ? mapState?.trajectory : null;
-  const droneTrail = layers.droneTrail && availableLayer(mapState?.drone_trail) ? mapState?.drone_trail : null;
-  const targetHistory = layers.targetHistory ? mapState?.target_history ?? [] : [];
-  const dronePose = mapState?.drone_pose?.position ?? null;
-  const targetState = availableTarget(mapState?.target_state) ? mapState?.target_state : null;
+  const storedConductors = layers.storedOverview ? availableConductors(projectionState?.stored_overview_conductors) : [];
+  const liveConductors = layers.livePerception ? availableConductors(projectionState?.live_conductors) : [];
+  const trajectory = layers.trajectory && availableLayer(projectionState?.trajectory) ? projectionState?.trajectory : null;
+  const droneTrail = layers.droneTrail && availableLayer(projectionState?.drone_trail) ? projectionState?.drone_trail : null;
+  const targetHistory = layers.targetHistory ? projectionState?.target_history ?? [] : [];
+  const dronePose = projectionState?.drone_pose?.position ?? null;
+  const targetState = availableTarget(projectionState?.target_state) ? projectionState?.target_state : null;
+  const pylons = projection === "top_down" ? mapState?.pylon_endpoints ?? [] : [];
+  const corridor = projection === "top_down" && availableLayer(mapState?.inferred_corridor) ? mapState?.inferred_corridor : null;
+  const preview = projection === "top_down" && availableTarget(mapState?.capture_preview) ? mapState?.capture_preview : null;
   const legendItems = legendItemsFor({
     compact,
     hasStored: storedConductors.length > 0,
@@ -34,8 +49,9 @@ export function MapView({
   });
 
   return (
-    <figure className={compact ? "map-view map-view--compact" : "map-view"} data-projection={projection}>
+    <figure className={`${compact ? "map-view map-view--compact" : "map-view"}${mapState?.freshness === "stale" || staleSources.length ? " map-view--stale" : ""}`} data-projection={projection}>
       <svg viewBox={`0 0 ${view.width} ${view.height}`} role="img" aria-label={`${projection} map`}>
+        {projection === "powerline_orthogonal" ? <desc>Lateral offset and vertical offset in metres.</desc> : null}
         <rect className="map-background" x={0} y={0} width={view.width} height={view.height} />
         <g className="map-grid">
           {[0.25, 0.5, 0.75].map((fraction) => (
@@ -45,6 +61,7 @@ export function MapView({
             <line key={`h-${fraction}`} x1={0} x2={view.width} y1={view.height * fraction} y2={view.height * fraction} />
           ))}
         </g>
+        {projection === "powerline_orthogonal" ? <MetricAxes bounds={bounds} view={view} /> : null}
         {storedConductors.flatMap((conductor, conductorIndex) =>
               (conductor.points ?? []).map((point, pointIndex) => (
                 <Marker
@@ -52,7 +69,7 @@ export function MapView({
                   point={point}
                   bounds={bounds}
                   view={view}
-                  className="map-marker map-marker--stored"
+                  className={`map-marker map-marker--stored${conductor.source_status === "stale" ? " map-source--stale" : ""}`}
                   testId={conductorIndex === 0 && pointIndex === 0 ? "map-layer-stored" : undefined}
                   radius={6}
                 />
@@ -65,32 +82,80 @@ export function MapView({
                   point={point}
                   bounds={bounds}
                   view={view}
-                  className="map-marker map-marker--live"
+                  className={`map-marker map-marker--live${conductor.source_status === "stale" ? " map-source--stale" : ""}`}
                   testId={conductorIndex === 0 && pointIndex === 0 ? "map-layer-live" : undefined}
                   radius={5}
                 />
               )),
             )}
         {trajectory?.points ? (
-          <Polyline points={trajectory.points} bounds={bounds} view={view} className="map-layer map-layer--trajectory" testId="map-layer-trajectory" />
+          <Polyline points={trajectory.points} bounds={bounds} view={view} className={`map-layer map-layer--trajectory${trajectory.source_status === "stale" ? " map-source--stale" : ""}`} testId="map-layer-trajectory" />
         ) : null}
+        {corridor?.points ? <Polyline points={corridor.points} bounds={bounds} view={view} className="map-layer map-layer--corridor" testId="map-layer-corridor" /> : null}
         {droneTrail?.points ? (
-          <Polyline points={shortTrail(droneTrail.points)} bounds={bounds} view={view} className="map-layer map-layer--drone-trail" testId="map-layer-drone-trail" />
+          <Polyline points={shortTrail(droneTrail.points)} bounds={bounds} view={view} className={`map-layer map-layer--drone-trail${droneTrail.source_status === "stale" ? " map-source--stale" : ""}`} testId="map-layer-drone-trail" />
         ) : null}
         {targetHistory.length > 0 ? (
           <Polyline points={targetHistory} bounds={bounds} view={view} className="map-layer map-layer--target-history" testId="map-layer-target-history" />
         ) : null}
         {dronePose ? <Marker point={dronePose} bounds={bounds} view={view} className="map-marker map-marker--drone" testId="map-marker-drone" /> : null}
-        {targetState?.position ? <Marker point={targetState.position} bounds={bounds} view={view} className="map-marker map-marker--target" testId="map-marker-target" /> : null}
+        {targetState?.position ? <Marker point={targetState.position} bounds={bounds} view={view} className={`map-marker map-marker--target${targetState.status === "stale" ? " map-source--stale" : ""}`} testId="map-marker-target" /> : null}
+        {pylons.map((pylon) => <Marker key={pylon.pylon_id} point={pylon.position} bounds={bounds} view={view} className="map-marker map-marker--pylon" testId={`map-marker-pylon-${pylon.pylon_id}`} radius={7} />)}
+        {preview?.position ? <Marker point={preview.position} bounds={bounds} view={view} className="map-marker map-marker--preview" testId="map-marker-capture-preview" radius={9} /> : null}
+        {layers.labels && pylons.map((pylon) => <MapText key={pylon.pylon_id} point={pylon.position} label={pylon.label} bounds={bounds} view={view} />)}
         {layers.labels && !compact ? <MapLabels storedConductors={storedConductors} liveConductors={liveConductors} dronePose={dronePose} targetState={targetState} bounds={bounds} view={view} /> : null}
         <MapLegend compact={compact} items={legendItems} />
       </svg>
       <figcaption>
-        {noReference ? "No powerline reference" : mapState?.frame?.reference_source ?? "runtime map"}
-        {degradedReason ? `: ${degradedReason}` : ""}
+        <span>{noReference ? "No powerline reference" : mapState?.frame?.reference_source ?? "runtime map"}{degradedReason ? `: ${degradedReason}` : ""}</span>
+        {mapState?.freshness === "stale" || staleSources.length ? (
+          <strong className="map-source-warning">STALE: {staleSources.length ? staleSources.join(", ") : "map state"}</strong>
+        ) : null}
+        {mapState?.transport ? <small>{formatAge(mapState.transport.live_source_age_ms)} live age / {formatBytes(mapState.transport.serialized_bytes)} payload</small> : null}
       </figcaption>
     </figure>
   );
+}
+
+function mapStaleSources(mapState?: MapState | null): string[] {
+  if (!mapState) return [];
+  const sources: string[] = [];
+  if ((mapState.live_conductors ?? []).some((item) => item.source_status === "stale")) sources.push("live geometry");
+  if (mapState.drone_pose && mapState.transport?.drone_pose_age_ms != null && mapState.transport.drone_pose_age_ms > (mapState.transport.stale_after_ms ?? 0)) sources.push("drone pose");
+  if (mapState.target_state?.status === "stale") sources.push("target");
+  if (mapState.trajectory?.source_status === "stale") sources.push("trajectory");
+  return sources;
+}
+
+function formatAge(value?: number | null): string {
+  if (typeof value !== "number") return "unknown";
+  return value < 1000 ? `${Math.round(value)} ms` : `${(value / 1000).toFixed(1)} s`;
+}
+
+function formatBytes(value?: number | null): string {
+  if (typeof value !== "number") return "unknown";
+  return value < 1024 ? `${value} B` : `${(value / 1024).toFixed(1)} KiB`;
+}
+
+function MapText({ point, label, bounds, view }: { point: Point2D; label: string; bounds: Bounds; view: View }) {
+  const [x, y] = project(point, bounds, view).split(",").map(Number);
+  return <text className="map-endpoint-label" x={x + 9} y={y - 9}>{label}</text>;
+}
+
+function projectState(mapState: MapState | null | undefined, projection: MapProjection): MapState | null | undefined {
+  if (!mapState || projection !== "top_down") return mapState;
+  return {
+    ...mapState,
+    live_conductors: mapState.top_down_live_conductors,
+    recent_live_conductors: mapState.top_down_recent_live_conductors,
+    stored_overview_conductors: mapState.top_down_stored_overview_conductors,
+    drone_pose: mapState.top_down_drone_pose,
+    target_state: mapState.top_down_target_state,
+    target_history: mapState.top_down_target_history,
+    trajectory: mapState.top_down_trajectory,
+    drone_trail: mapState.top_down_drone_trail,
+    auto_fit_bounds: mapState.top_down_auto_fit_bounds,
+  };
 }
 
 function Polyline({
@@ -215,6 +280,33 @@ function MapLabels({
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 type View = { width: number; height: number; padding: number };
 
+function MetricAxes({ bounds, view }: { bounds: Bounds; view: View }) {
+  const ticks = [0, 0.25, 0.5, 0.75, 1];
+  const plotWidth = view.width - view.padding * 2;
+  const plotHeight = view.height - view.padding * 2;
+  return (
+    <g className="map-axes" aria-hidden="true">
+      {ticks.map((fraction) => {
+        const x = view.padding + plotWidth * fraction;
+        const value = bounds.minX + (bounds.maxX - bounds.minX) * fraction;
+        return <g key={`x-${fraction}`}><line x1={x} x2={x} y1={view.height - view.padding} y2={view.height - view.padding + 5} /><text x={x} y={view.height - view.padding + 18} textAnchor="middle">{formatTick(value)}</text></g>;
+      })}
+      {ticks.map((fraction) => {
+        const y = view.height - view.padding - plotHeight * fraction;
+        const value = bounds.minY + (bounds.maxY - bounds.minY) * fraction;
+        return <g key={`y-${fraction}`}><line x1={view.padding - 5} x2={view.padding} y1={y} y2={y} /><text x={view.padding - 9} y={y + 4} textAnchor="end">{formatTick(value)}</text></g>;
+      })}
+      <text className="map-axis-label" x={view.width / 2} y={view.height - 5} textAnchor="middle">Lateral offset (m)</text>
+      <text className="map-axis-label" x={12} y={view.height / 2} textAnchor="middle" transform={`rotate(-90 12 ${view.height / 2})`}>Vertical offset (m)</text>
+    </g>
+  );
+}
+
+function formatTick(value: number): string {
+  const rounded = Math.abs(value) < 0.05 ? 0 : value;
+  return rounded.toFixed(1);
+}
+
 function mapBounds(mapState?: MapState | null): Bounds {
   if (mapState?.auto_fit_bounds) {
     return {
@@ -250,15 +342,15 @@ function allPoints(mapState?: MapState | null): Point2D[] {
 }
 
 function availableConductors(conductors?: ConductorGeometry[] | null): ConductorGeometry[] {
-  return (conductors ?? []).filter((conductor) => conductor.source_status === "available" && (conductor.points?.length ?? 0) > 0);
+  return (conductors ?? []).filter((conductor) => ["available", "stale"].includes(conductor.source_status ?? "missing") && (conductor.points?.length ?? 0) > 0);
 }
 
 function availableLayer(layer?: PolylineLayer | null): layer is PolylineLayer {
-  return Boolean(layer && layer.source_status === "available" && (layer.points?.length ?? 0) > 0);
+  return Boolean(layer && ["available", "stale"].includes(layer.source_status ?? "missing") && (layer.points?.length ?? 0) > 0);
 }
 
 function availableTarget(target?: TargetState | null): target is TargetState {
-  return Boolean(target?.position && target.status === "available");
+  return Boolean(target?.position && ["available", "stale"].includes(target.status ?? "missing"));
 }
 
 function legendItemsFor({
@@ -304,7 +396,7 @@ function viewBox(sourceBounds: Bounds): View {
   const bounds = { ...sourceBounds };
   const width = 760;
   const height = 430;
-  const padding = 28;
+  const padding = 48;
   const spanX = Math.max(1, bounds.maxX - bounds.minX);
   const spanY = Math.max(1, bounds.maxY - bounds.minY);
   const aspect = width / height;

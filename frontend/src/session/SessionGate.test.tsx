@@ -15,6 +15,8 @@ const runtime: RuntimeEndpointSummary = {
   port: 8765,
   api_version: "v2alpha1",
   profile: "sim",
+  runtime_id: "runtime-1",
+  system_id: "aircraft-sim-1",
   reachable: true,
   last_seen_at: "2026-05-27T18:00:00Z",
 };
@@ -86,7 +88,7 @@ describe("SessionGate", () => {
     renderGate();
 
     expect(await screen.findByLabelText("Runtime endpoint")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Sim Runtime - 10.0.0.2:8765" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Sim Runtime - 10.0.0.2:8765 - aircraft-sim-1 [sim]" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Manual endpoint")).not.toBeInTheDocument();
     expect(screen.queryByText("v2alpha1")).not.toBeInTheDocument();
     expect(screen.queryByText("armed")).not.toBeInTheDocument();
@@ -96,6 +98,7 @@ describe("SessionGate", () => {
   it("selects runtime endpoints only through the dropdown", async () => {
     const client = renderGate();
 
+    await screen.findByRole("option", { name: "Sim Runtime - 10.0.0.2:8765 - aircraft-sim-1 [sim]" });
     fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
       target: { value: "runtime-1" },
     });
@@ -110,7 +113,8 @@ describe("SessionGate", () => {
     fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
       target: { value: "runtime-1" },
     });
-    await screen.findByText("Selected runtime: Sim Runtime");
+    await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
+    fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
     fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
     fireEvent.submit(screen.getByLabelText("Operator password").closest("form") as HTMLFormElement);
 
@@ -151,7 +155,8 @@ describe("SessionGate", () => {
     fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
       target: { value: "runtime-1" },
     });
-    await screen.findByText("Selected runtime: Sim Runtime");
+    await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
+    fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
     fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
     fireEvent.submit(screen.getByLabelText("Operator password").closest("form") as HTMLFormElement);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
@@ -174,7 +179,8 @@ describe("SessionGate", () => {
     fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
       target: { value: "runtime-1" },
     });
-    await screen.findByText("Selected runtime: Sim Runtime");
+    await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
+    fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
     fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
     fireEvent.submit(screen.getByLabelText("Operator password").closest("form") as HTMLFormElement);
     await screen.findByLabelText("Runtime session");
@@ -193,6 +199,20 @@ describe("SessionGate", () => {
     await waitFor(() => expect(client.validateTarget).toHaveBeenCalledWith("runtime-1"));
     expect(client.selectTarget).toHaveBeenCalledWith("runtime-1");
     expect(client.session).not.toHaveBeenCalled();
-    expect(await screen.findByText("Selected runtime: Sim Runtime")).toBeInTheDocument();
+    expect(await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 })).toBeInTheDocument();
+  });
+
+  it("requires positive aircraft identity confirmation before login", async () => {
+    renderGate();
+
+    fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
+      target: { value: "runtime-1" },
+    });
+    await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
+
+    expect(screen.getByRole("button", { name: "Login" })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
+    expect(screen.getByRole("button", { name: "Login" })).toBeEnabled();
+    expect(screen.getByText("aircraft-sim-1")).toBeInTheDocument();
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { LogFollowHandle, LogLine, LogSourceSummary, RuntimeLogsClient } from "../api/logs";
-import { CommandResultNotice, type CommandResult } from "../components";
+import { CommandResultNotice, DisabledControl, type CommandResult } from "../components";
 import type { RuntimeStoreState } from "../state";
 
 const DEFAULT_SOURCES: LogSourceSummary[] = [
@@ -28,9 +28,11 @@ export function LogsPage({
   const [lines, setLines] = useState<LogLine[]>(initialLines);
   const [query, setQuery] = useState("");
   const [tailLines, setTailLines] = useState(200);
-  const [following, setFollowing] = useState(false);
+  const [followState, setFollowState] = useState<"stopped" | "connecting" | "following">("stopped");
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
   const followHandleRef = useRef<LogFollowHandle | null>(null);
+  const logLinesRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollRef = useRef(true);
   const activeSource = sources.find((source) => source.source_id === activeSourceId) ?? sources[0];
 
   useEffect(() => {
@@ -71,7 +73,17 @@ export function LogsPage({
     };
   }, [activeSourceId, authenticated, logsClient, tailLines]);
 
-  useEffect(() => () => stopFollow(), []);
+  useEffect(() => {
+    if (!authenticated) stopFollow();
+    return () => stopFollow();
+  }, [authenticated, logsClient]);
+
+  useEffect(() => {
+    if (followState === "following" && autoScrollRef.current) {
+      const element = logLinesRef.current;
+      if (element) element.scrollTop = element.scrollHeight;
+    }
+  }, [lines, followState]);
 
   const filteredLines = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -100,7 +112,7 @@ export function LogsPage({
   function stopFollow() {
     followHandleRef.current?.close();
     followHandleRef.current = null;
-    setFollowing(false);
+    setFollowState("stopped");
   }
 
   function startFollow() {
@@ -114,6 +126,7 @@ export function LogsPage({
       return;
     }
     stopFollow();
+    setFollowState("connecting");
     followHandleRef.current = logsClient.follow(
       activeSource.source_id,
       (line) => setLines((current) => [...current, line].slice(-1000)),
@@ -124,8 +137,8 @@ export function LogsPage({
           title: "Follow failed",
           message,
         }),
+      (connected) => setFollowState(connected ? "following" : "stopped"),
     );
-    setFollowing(true);
   }
 
   async function exportCurrentView() {
@@ -157,12 +170,12 @@ export function LogsPage({
         <div className="workflow-section__heading">
           <h3>Log Sources</h3>
           <div className="inline-actions">
-            <button type="button" onClick={() => logsClient?.listSources().then(setSources)}>
+            <DisabledControl reason={logsClient ? undefined : "Runtime log client is unavailable."}><button type="button" disabled={!logsClient} onClick={() => logsClient?.listSources().then(setSources)}>
               Refresh sources
-            </button>
-            <button type="button" onClick={() => logsClient?.tail(activeSourceId, tailLines).then(setLines)}>
+            </button></DisabledControl>
+            <DisabledControl reason={logsClient ? undefined : "Runtime log client is unavailable."}><button type="button" disabled={!logsClient} onClick={() => logsClient?.tail(activeSourceId, tailLines).then(setLines)}>
               Refresh history
-            </button>
+            </button></DisabledControl>
           </div>
         </div>
         <div className="log-source-list">
@@ -192,9 +205,9 @@ export function LogsPage({
               Search
               <input id="log-search" value={query} onChange={(event) => setQuery(event.target.value)} />
             </label>
-            {following ? (
+            {followState !== "stopped" ? (
               <button type="button" onClick={stopFollow}>
-                Stop follow
+                {followState === "connecting" ? "Cancel follow" : "Stop follow"}
               </button>
             ) : (
               <button type="button" onClick={startFollow}>
@@ -206,7 +219,16 @@ export function LogsPage({
             </button>
           </div>
         </div>
-        <div className="log-lines" role="log" aria-label="Runtime log lines">
+        <div
+          className="log-lines"
+          role="log"
+          aria-label="Runtime log lines"
+          ref={logLinesRef}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            autoScrollRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+          }}
+        >
           {filteredLines.length > 0 ? (
             filteredLines.map((line, index) => (
               <pre key={`${line.source_id}-${index}`}>

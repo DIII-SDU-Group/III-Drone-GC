@@ -26,7 +26,10 @@ function state(overrides: Partial<RuntimeStoreState> = {}): RuntimeStoreState {
         owner: "transitioning",
         active_setpoint_owner: "px4",
         transition_target: "mission",
-        latest: { transition_timeout_warning: "mission transition timeout approaching" },
+        latest: {
+          transition_timeout_warning: "mission transition timeout approaching",
+          transition: { status: "transitioning", message: "Waiting for PX4 and mission mode confirmation" },
+        },
         freshness: "fresh",
       },
       mission: { active_spec_id: "mission-1", required_modes_registered: true, freshness: "fresh" },
@@ -58,7 +61,9 @@ describe("FlightPage", () => {
     });
     render(<FlightPage state={state()} dispatchCommand={dispatchCommand} />);
 
-    fireEvent.pointerUp(screen.getByRole("button", { name: "Hold" }));
+    const holdButton = screen.getByRole("button", { name: "Hold" });
+    fireEvent.pointerDown(holdButton);
+    fireEvent.pointerUp(holdButton);
 
     expect(dispatchCommand).toHaveBeenCalledWith("px4.hold");
   });
@@ -78,6 +83,23 @@ describe("FlightPage", () => {
     });
 
     expect(dispatchCommand).toHaveBeenCalledWith("px4.land");
+  });
+
+  it("starts inspection by stable mode key after press-and-hold", () => {
+    vi.useFakeTimers();
+    const dispatchCommand = vi.fn().mockResolvedValue({
+      request_id: "inspection-1",
+      command_id: "mission.activate",
+      accepted: true,
+    });
+    render(<FlightPage state={state()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Start Inspection" }));
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.activate", { mode_key: "inspection_demo" });
   });
 
   it("does not implicitly arm before takeoff and shows runtime-aligned reason", () => {
@@ -122,6 +144,35 @@ describe("FlightPage", () => {
     expect(screen.getByText("ROS/uXRCE")).toBeInTheDocument();
     expect(screen.getByText(/"field":"armed"/)).toBeInTheDocument();
     expect(screen.getByText("mission transition timeout approaching")).toBeInTheDocument();
+    expect(screen.getAllByText("transitioning").length).toBeGreaterThan(0);
+    expect(screen.getByText("Waiting for PX4 and mission mode confirmation")).toBeInTheDocument();
+  });
+
+  it("shows Hold confirmation separately from autonomous action stopping", () => {
+    render(
+      <FlightPage
+        state={state({
+          domains: {
+            control: {
+              owner: "stopping",
+              transition_target: "px4_hold",
+              freshness: "fresh",
+              latest: {
+                transition: {
+                  status: "stopping",
+                  message: "PX4 Hold confirmed; safely stopping active owner(s): mission",
+                },
+              },
+            },
+            vehicle: { armed: true, in_air: true, nav_state: "hold", freshness: "fresh" },
+          },
+        })}
+        dispatchCommand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("stopping").length).toBeGreaterThan(0);
+    expect(screen.getByText("PX4 Hold confirmed; safely stopping active owner(s): mission")).toBeInTheDocument();
   });
 
   it("uses runtime command permission reasons when available", () => {
@@ -141,7 +192,7 @@ describe("FlightPage", () => {
       />,
     );
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Activate mission" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Start Inspection" }));
 
     expect(dispatchCommand).not.toHaveBeenCalled();
     expect(screen.getAllByText("system is not running").length).toBeGreaterThan(0);
@@ -235,7 +286,7 @@ describe("FlightPage", () => {
     expect(screen.getByText("On cable")).toBeInTheDocument();
     expect(screen.getByText("yes (7)")).toBeInTheDocument();
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Activate mission" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Start Inspection" }));
 
     expect(dispatchCommand).not.toHaveBeenCalled();
     expect(screen.getByText(/mission activation is disabled while the vehicle is on cable 7/)).toBeInTheDocument();

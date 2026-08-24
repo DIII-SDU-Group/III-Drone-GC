@@ -7,6 +7,8 @@ export type RuntimeEndpointSummary = {
   port: number;
   api_version?: string | null;
   profile?: string | null;
+  runtime_id?: string | null;
+  system_id?: string | null;
   reachable?: boolean | null;
   last_seen_at: string;
 };

@@ -15,6 +15,7 @@ from .discovery import ManualEndpointRequest, RuntimeDiscoveryService, RuntimeEn
 from .proxy import (
     HttpxProxyHttpClient,
     ProxyHttpClient,
+    ProxyUpstreamTimeout,
     WebSocketProxyTransport,
     WebsocketsProxyTransport,
     build_upstream_http_url,
@@ -30,6 +31,10 @@ class GCProxySettings:
     proxy_name: str = "III Ground Control Proxy"
     schema_revision: str = "v2alpha1"
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
+    expected_runtime_id: str | None = None
+    expected_system_id: str | None = None
+    expected_profile: str | None = None
+    runtime_request_timeout_s: float = 30.0
 
     @classmethod
     def from_env(cls) -> "GCProxySettings":
@@ -41,11 +46,34 @@ class GCProxySettings:
             ).split(",")
             if origin.strip()
         )
+        expected_profile = os.environ.get("III_GC_EXPECTED_PROFILE")
+        expected_runtime_id = os.environ.get("III_GC_EXPECTED_RUNTIME_ID")
+        expected_system_id = os.environ.get("III_GC_EXPECTED_SYSTEM_ID")
+        runtime_request_timeout_s = float(os.environ.get("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "30"))
+        if runtime_request_timeout_s <= 0:
+            raise RuntimeError("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC must be greater than zero")
+        if expected_profile == "real":
+            missing = [
+                name
+                for name, value in (
+                    ("III_GC_EXPECTED_RUNTIME_ID", expected_runtime_id),
+                    ("III_GC_EXPECTED_SYSTEM_ID", expected_system_id),
+                )
+                if not value
+            ]
+            if missing:
+                raise RuntimeError("real ground-control profile requires: " + ", ".join(missing))
+            if not cors_origins or "*" in cors_origins:
+                raise RuntimeError("real ground-control profile requires explicit III_GC_PROXY_CORS_ORIGINS")
         return cls(
             proxy_id=os.environ.get("III_GC_PROXY_ID", "iii-gc-proxy"),
             proxy_name=os.environ.get("III_GC_PROXY_NAME", "III Ground Control Proxy"),
             schema_revision=os.environ.get("III_GC_PROXY_SCHEMA_REVISION", "v2alpha1"),
             cors_origins=cors_origins,
+            expected_runtime_id=expected_runtime_id,
+            expected_system_id=expected_system_id,
+            expected_profile=expected_profile,
+            runtime_request_timeout_s=runtime_request_timeout_s,
         )
 
 
@@ -65,8 +93,13 @@ def create_app(
 ) -> FastAPI:
     proxy_settings = settings or GCProxySettings.from_env()
     runtime_discovery = discovery_service or RuntimeDiscoveryService()
-    runtime_targets = target_manager or RuntimeTargetManager(discovery=runtime_discovery)
-    runtime_http_proxy = proxy_http_client or HttpxProxyHttpClient()
+    runtime_targets = target_manager or RuntimeTargetManager(
+        discovery=runtime_discovery,
+        expected_runtime_id=proxy_settings.expected_runtime_id,
+        expected_system_id=proxy_settings.expected_system_id,
+        expected_profile=proxy_settings.expected_profile,
+    )
+    runtime_http_proxy = proxy_http_client or HttpxProxyHttpClient(timeout_s=proxy_settings.runtime_request_timeout_s)
     runtime_ws_proxy = websocket_proxy or WebsocketsProxyTransport()
     app = FastAPI(
         title="III Ground Control Proxy",
@@ -147,12 +180,18 @@ def create_app(
             upstream_url = build_upstream_http_url(selected.base_url, path, query_string)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        proxy_response = await runtime_http_proxy.request(
-            method=request.method,
-            url=upstream_url,
-            headers=filtered_request_headers(request.headers),
-            content=await request.body(),
-        )
+        try:
+            proxy_response = await runtime_http_proxy.request(
+                method=request.method,
+                url=upstream_url,
+                headers=filtered_request_headers(request.headers),
+                content=await request.body(),
+            )
+        except ProxyUpstreamTimeout as exc:
+            raise HTTPException(
+                status_code=504,
+                detail=f"{exc}; the command outcome is unknown, refresh authoritative state before retrying",
+            ) from exc
         normalized_path = path.strip("/")
         if 200 <= proxy_response.status_code < 300 and normalized_path == "session/login":
             runtime_targets.mark_browser_connected(True)

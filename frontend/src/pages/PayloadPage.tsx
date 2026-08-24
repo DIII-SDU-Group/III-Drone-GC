@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { ToastRegion, type CommandResult, type ToastMessage } from "../components";
+import { DisabledControl, ToastRegion, type CommandResult, type ToastMessage } from "../components";
 import type { RuntimeCommandDispatcher } from "../api/commands";
 import type { CommandResponse } from "../generated/contracts";
 import type { RuntimeStoreState } from "../state";
@@ -13,9 +13,12 @@ export function PayloadPage({
   dispatchCommand: RuntimeCommandDispatcher;
 }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const disabledReason = gripperDisabledReason(state);
 
   async function run(commandId: string) {
+    if (pendingCommand) return;
+    setPendingCommand(commandId);
     try {
       const response = await dispatchCommand(commandId);
       const result = commandResponseToResult(response);
@@ -23,6 +26,8 @@ export function PayloadPage({
     } catch (error) {
       const result = errorToResult(commandId, error);
       setToasts((current) => [...current, result]);
+    } finally {
+      setPendingCommand(null);
     }
   }
 
@@ -56,20 +61,26 @@ export function PayloadPage({
 
       <section className="workflow-section">
         <h3>Gripper Controls</h3>
-        {disabledReason ? <p className="control-reason">{disabledReason}</p> : null}
-        <div className="inline-actions">
-          <button type="button" disabled={Boolean(disabledReason)} onClick={() => void run("payload.gripper.open")}>
-            Open gripper
-          </button>
-          <button type="button" disabled={Boolean(disabledReason)} onClick={() => void run("payload.gripper.close")}>
-            Close gripper
-          </button>
+        <div className="segmented-control" role="group" aria-label="Gripper state">
+          <DisabledControl reason={gripperActionDisabledReason(state, "open", disabledReason, pendingCommand)}>
+            <button type="button" aria-label="Open gripper" aria-pressed={state.domains.payload?.gripper_status === "open"} disabled={Boolean(gripperActionDisabledReason(state, "open", disabledReason, pendingCommand))} onClick={() => void run("payload.gripper.open")}>Open</button>
+          </DisabledControl>
+          <DisabledControl reason={gripperActionDisabledReason(state, "closed", disabledReason, pendingCommand)}>
+            <button type="button" aria-label="Close gripper" aria-pressed={state.domains.payload?.gripper_status === "closed"} disabled={Boolean(gripperActionDisabledReason(state, "closed", disabledReason, pendingCommand))} onClick={() => void run("payload.gripper.close")}>Closed</button>
+          </DisabledControl>
         </div>
       </section>
 
       <ToastRegion toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </div>
   );
+}
+
+function gripperActionDisabledReason(state: RuntimeStoreState, target: "open" | "closed", globalReason?: string, pendingCommand?: string | null): string | undefined {
+  if (globalReason) return globalReason;
+  if (pendingCommand) return "A gripper transition is pending.";
+  if (state.domains.payload?.gripper_status === target) return `Gripper is already ${target}.`;
+  return undefined;
 }
 
 function gripperDisabledReason(state: RuntimeStoreState): string | undefined {

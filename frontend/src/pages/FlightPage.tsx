@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   PressAndHoldButton,
@@ -32,9 +32,11 @@ export function FlightPage({
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const showSourceDisagreementReasons = useSustainedSourceDisagreement(state, DISAGREEMENT_DISPLAY_DELAY_MS);
 
-  async function runCommand(commandId: string) {
+  async function runCommand(commandId: string, parameters?: Record<string, unknown>) {
     try {
-      const response = await dispatchCommand(commandId);
+      const response = parameters
+        ? await dispatchCommand(commandId, parameters)
+        : await dispatchCommand(commandId);
       const result = commandResponseToResult(response);
       setToasts((current) => [...current, { ...result, autoDismissMs: response.accepted ? 2400 : undefined }]);
     } catch (error) {
@@ -46,7 +48,7 @@ export function FlightPage({
   return (
     <div className="workflow-page flight-page">
       <section className="workflow-section">
-        <h3>Flight Controls</h3>
+        <div className="workflow-section__heading"><h3>Engineering Flight Controls</h3><span>simulation / commissioning</span></div>
         <div className="command-grid flight-command-grid">
           <PressAndHoldButton
             label="Arm"
@@ -73,9 +75,9 @@ export function FlightPage({
             disabledReason={flightDisabledReason(state, FLIGHT_COMMANDS.hold, showSourceDisagreementReasons)}
           />
           <PressAndHoldButton
-            label="Activate mission"
+            label="Start Inspection"
             className="flight-control-mission"
-            onConfirm={() => void runCommand(FLIGHT_COMMANDS.missionActivate)}
+            onConfirm={() => void runCommand(FLIGHT_COMMANDS.missionActivate, { mode_key: "inspection_demo" })}
             disabledReason={flightDisabledReason(state, FLIGHT_COMMANDS.missionActivate, showSourceDisagreementReasons)}
           />
           <PressAndHoldButton
@@ -136,6 +138,14 @@ export function FlightPage({
             <dd>{state.domains.control?.transition_target ?? "none"}</dd>
           </div>
           <div>
+            <dt>Status</dt>
+            <dd>{transitionField(state, "status") ?? "none"}</dd>
+          </div>
+          <div>
+            <dt>Detail</dt>
+            <dd>{transitionField(state, "message") ?? state.domains.control?.degraded_reason ?? "none"}</dd>
+          </div>
+          <div>
             <dt>Setpoint owner</dt>
             <dd>{state.domains.control?.active_setpoint_owner ?? "none"}</dd>
           </div>
@@ -151,7 +161,7 @@ export function FlightPage({
   );
 }
 
-function flightDisabledReason(state: RuntimeStoreState, commandId: string, showSourceDisagreementReasons = true): string | undefined {
+export function flightDisabledReason(state: RuntimeStoreState, commandId: string, showSourceDisagreementReasons = true): string | undefined {
   if (state.connection.commands_disabled_reason) {
     return state.connection.commands_disabled_reason;
   }
@@ -245,31 +255,19 @@ function flightDisabledReason(state: RuntimeStoreState, commandId: string, showS
 
 function useSustainedSourceDisagreement(state: RuntimeStoreState, delayMs: number): boolean {
   const disagreementKey = useMemo(() => sourceDisagreementKey(state), [state]);
-  const [sustained, setSustained] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sustainedKey, setSustainedKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    setSustained(false);
     if (!disagreementKey) {
       return undefined;
     }
-    timerRef.current = setTimeout(() => {
-      setSustained(true);
-      timerRef.current = null;
+    const timer = setTimeout(() => {
+      setSustainedKey(disagreementKey);
     }, delayMs);
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
+    return () => clearTimeout(timer);
   }, [delayMs, disagreementKey]);
 
-  return !disagreementKey || sustained;
+  return !disagreementKey || sustainedKey === disagreementKey;
 }
 
 function sourceDisagreementKey(state: RuntimeStoreState): string | null {
@@ -323,6 +321,15 @@ function Disagreements({ value }: { value: unknown }) {
 function transitionTimeoutWarning(state: RuntimeStoreState): string | null {
   const warning = state.domains.control?.latest?.transition_timeout_warning;
   return typeof warning === "string" ? warning : null;
+}
+
+function transitionField(state: RuntimeStoreState, field: "status" | "message"): string | null {
+  const transition = state.domains.control?.latest?.transition;
+  if (!transition || typeof transition !== "object") {
+    return null;
+  }
+  const value = (transition as Record<string, unknown>)[field];
+  return typeof value === "string" && value ? value : null;
 }
 
 function commandResponseToResult(response: CommandResponse): CommandResult {

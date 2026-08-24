@@ -3,6 +3,7 @@ export { ConfigurationPage } from "./ConfigurationPage";
 export { FlightPage } from "./FlightPage";
 export { LogsPage } from "./LogsPage";
 export { MapPage } from "./MapPage";
+export { MissionPage } from "./MissionPage";
 export { OperationsPage } from "./OperationsPage";
 export { PayloadPage } from "./PayloadPage";
 export { PerceptionPage } from "./PerceptionPage";

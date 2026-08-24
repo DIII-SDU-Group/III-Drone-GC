@@ -4,7 +4,7 @@ from starlette.websockets import WebSocketDisconnect
 from iii_drone_contracts import ApiCompatibility, ApiIdentity
 from iii_drone_gc.v2_proxy.app import GCProxySettings, create_app
 from iii_drone_gc.v2_proxy.discovery import RuntimeDiscoveryService, RuntimeEndpointSummary, StaticDiscoveryProvider
-from iii_drone_gc.v2_proxy.proxy import ProxyHttpResponse
+from iii_drone_gc.v2_proxy.proxy import ProxyHttpResponse, ProxyUpstreamTimeout
 from iii_drone_gc.v2_proxy.targets import RuntimeTargetManager
 
 
@@ -29,6 +29,11 @@ class _FakeHttpProxyClient:
             headers={"content-type": "application/json", "x-upstream": "runtime"},
             content=b'{"ok":true}',
         )
+
+
+class _TimeoutHttpProxyClient:
+    async def request(self, **_kwargs):
+        raise ProxyUpstreamTimeout("selected runtime timed out after 30.0s")
 
 
 class _FakeWebSocketProxy:
@@ -105,6 +110,16 @@ def test_rest_proxy_rejects_absolute_upstream_paths():
     assert response.status_code == 400
     assert "relative" in response.json()["detail"]
     assert http_proxy.requests == []
+
+
+def test_rest_proxy_returns_typed_gateway_timeout_and_warns_that_outcome_is_unknown():
+    client, _ = _client(select=True, http_proxy=_TimeoutHttpProxyClient())
+
+    response = client.post("/proxy/commands/actions/start", json={"request_id": "req"})
+
+    assert response.status_code == 504
+    assert "outcome is unknown" in response.json()["detail"]
+    assert "refresh authoritative state" in response.json()["detail"]
 
 
 def test_proxy_passes_session_authority_through_and_tracks_connection_state_only():

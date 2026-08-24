@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import {
+  DisabledControl,
   PressAndHoldButton,
   ToastRegion,
   type CommandResult,
@@ -20,13 +21,18 @@ export function ConfigurationPage({
   state,
   dispatchCommand,
   onPendingEditsChange = () => undefined,
+  onOpenRuntime = () => undefined,
 }: {
   state: RuntimeStoreState;
   dispatchCommand: RuntimeCommandDispatcher;
   onPendingEditsChange?: (pending: boolean) => void;
+  onOpenRuntime?: () => void;
 }) {
   const manifest = configurationManifest(state);
   const [query, setQuery] = useState("");
+  const [nodeFilter, setNodeFilter] = useState("all");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [mutabilityFilter, setMutabilityFilter] = useState("all");
   const [staged, setStaged] = useState<Record<string, StagedEdit>>({});
   const [snapshotLabel, setSnapshotLabel] = useState("");
   const [overwriteSnapshotId, setOverwriteSnapshotId] = useState<string | null>(null);
@@ -35,7 +41,8 @@ export function ConfigurationPage({
   const writeDisabledReason = configurationWriteDisabledReason(state);
   const downloadDisabledReason = state.connection.commands_disabled_reason ?? undefined;
   const badges = configurationBadges(manifest, state, stagedEdits.length > 0);
-  const filteredNodes = filterNodes(manifest, query);
+  const rows = parameterRows(manifest);
+  const filteredRows = filterParameterRows(rows, query, nodeFilter, groupFilter, mutabilityFilter);
   const manifestUnavailableReason = configurationManifestUnavailableReason(state, manifest);
 
   useEffect(() => {
@@ -95,6 +102,7 @@ export function ConfigurationPage({
   }
 
   const invalidEditCount = stagedEdits.filter((edit) => validationError(edit.parameter, edit.valueText)).length;
+  const blockedEditCount = stagedEdits.filter((edit) => parameterApplyDisabledReason(edit.parameter, state)).length;
 
   return (
     <div className="workflow-page configuration-page">
@@ -105,7 +113,7 @@ export function ConfigurationPage({
             {badges.length > 0 ? badges.map((badge) => <span key={badge}>{badge}</span>) : <span>Clean</span>}
           </div>
         </div>
-        <dl className="status-list">
+        <dl className="status-list configuration-status-list">
           <div>
             <dt>Loaded snapshot</dt>
             <dd>{snapshotStatusLabel(manifest.status?.loaded_snapshot_id ?? state.domains.configuration?.active_snapshot_id, manifestUnavailableReason)}</dd>
@@ -115,8 +123,16 @@ export function ConfigurationPage({
             <dd>{snapshotStatusLabel(manifest.status?.default_snapshot_id, manifestUnavailableReason)}</dd>
           </div>
           <div>
+            <dt>Configuration server</dt>
+            <dd>{manifest.status?.configuration_server_available ? "available" : "unavailable"}</dd>
+          </div>
+          <div>
             <dt>Pending edits</dt>
             <dd>{stagedEdits.length}</dd>
+          </div>
+          <div>
+            <dt>Restart required</dt>
+            <dd>{manifest.status?.pending_restart ? "yes" : "no"}</dd>
           </div>
           <div>
             <dt>Unsaved</dt>
@@ -127,6 +143,13 @@ export function ConfigurationPage({
             <dd>{manifest.status?.non_default || state.domains.configuration?.non_default ? "yes" : "no"}</dd>
           </div>
         </dl>
+        {manifest.status?.pending_restart ? (
+          <div className="control-callout">
+            <strong>Only valid after system restart</strong>
+            <p>{(manifest.status.pending_constant_names ?? []).join(", ") || "Constant parameter changes are persisted."}</p>
+            <button type="button" onClick={onOpenRuntime}>Open Runtime</button>
+          </div>
+        ) : null}
         {state.domains.configuration?.degraded_reason ? <p className="control-reason">{state.domains.configuration.degraded_reason}</p> : null}
       </section>
 
@@ -143,72 +166,48 @@ export function ConfigurationPage({
             />
           </label>
         </div>
-        {writeDisabledReason ? <p className="control-reason">{writeDisabledReason}</p> : null}
         {manifestUnavailableReason ? <p className="control-hint">{manifestUnavailableReason}</p> : null}
-        <div className="parameter-browser">
-          {filteredNodes.map((node) => (
-            <section className="parameter-node" key={node.node_id}>
-              <h4>{node.label}</h4>
-              {node.groups?.map((group) => (
-                <div className="parameter-group" key={group.group_id}>
-                  <div className="parameter-group__heading">
-                    <strong>{group.label}</strong>
-                    <span>{restartSummary(group.parameters ?? [])}</span>
-                  </div>
-                  {(group.parameters ?? []).map((parameter) => {
+        <div className="parameter-table-tools">
+          <label>Node<select value={nodeFilter} onChange={(event) => setNodeFilter(event.target.value)}><option value="all">All nodes</option>{uniqueOptions(rows.map((row) => row.nodeLabel)).map((value) => <option key={value}>{value}</option>)}</select></label>
+          <label>Group/category<select value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}><option value="all">All groups</option>{uniqueOptions(rows.map((row) => row.groupLabel)).map((value) => <option key={value}>{value}</option>)}</select></label>
+          <label>Mutability<select value={mutabilityFilter} onChange={(event) => setMutabilityFilter(event.target.value)}><option value="all">All</option><option value="constant">Constant</option><option value="runtime">Runtime-editable</option><option value="readonly">Read-only</option></select></label>
+          <span aria-label="Parameter result count">{filteredRows.length} of {rows.length} parameters</span>
+        </div>
+        <div className="table-scroll parameter-table-scroll" tabIndex={0} aria-label="Parameter table scroll region">
+          <table className="data-table parameter-table">
+            <thead><tr><th>Parameter</th><th>Node</th><th>Group/category</th><th>Type</th><th>Active</th><th>Persisted</th><th>Edit value</th><th>Flags/policy</th><th>Actions</th></tr></thead>
+            <tbody>
+              {filteredRows.map(({ nodeLabel, groupLabel, parameter }) => {
                     const key = parameterKey(parameter);
                     const stagedEdit = staged[key];
                     const valueText = stagedEdit?.valueText ?? valueToInput(parameter.current_value, parameter.value_type);
                     const error = stagedEdit ? validationError(parameter, valueText) : null;
-                    return (
-                      <article className="parameter-row" key={key}>
-                        <div>
-                          <label htmlFor={parameterInputId(parameter)}>{parameter.name}</label>
-                          <p>{parameter.description ?? `${parameter.value_type} parameter`}</p>
-                          <div className="badge-row">
-                            {parameter.restart_required && parameter.restart_required !== "none" ? (
-                              <span>restart: {parameter.restart_required}</span>
-                            ) : null}
-                            {stagedEdit ? <span>Pending edits</span> : null}
-                            {valueChanged(parameter.current_value, parameter.loaded_value) ? <span>Unsaved</span> : null}
-                            {!valueChanged(parameter.current_value, parameter.loaded_value) && valueChanged(parameter.loaded_value, parameter.default_value) ? (
-                              <span>Non-default</span>
-                            ) : null}
-                          </div>
-                        </div>
-                        {parameterInput(parameter, valueText, Boolean(writeDisabledReason), (nextValue) =>
+                    const parameterDisabledReason = parameterApplyDisabledReason(parameter, state);
+                    const activeValue = parameter.active_value ?? parameter.current_value;
+                    const persistedValue = parameter.persisted_value ?? activeValue;
+                    const applyReason = !stagedEdit ? "No local edit to apply." : error ?? parameterDisabledReason;
+                    return <tr key={key}>
+                      <td><details><summary><label htmlFor={parameterInputId(parameter)}>{parameter.name}</label></summary><dl className="parameter-detail"><div><dt>Description</dt><dd>{parameter.description ?? "none"}</dd></div><div><dt>Default</dt><dd>{valueToInput(parameter.default_value, parameter.value_type)}</dd></div><div><dt>Loaded</dt><dd>{valueToInput(parameter.loaded_value, parameter.value_type)}</dd></div><div><dt>Constraints</dt><dd>{parameterConstraintSummary(parameter)}</dd></div><div><dt>Reference</dt><dd>{parameter.reference ?? "none"}</dd></div>{parameter.apply_rejection_reasons?.length ? <div><dt>Apply rejection</dt><dd>{parameter.apply_rejection_reasons.join("; ")}</dd></div> : null}</dl></details></td>
+                      <td>{nodeLabel}</td><td>{groupLabel}</td><td>{parameter.value_type}</td>
+                      <td>{valueToInput(activeValue, parameter.value_type)}</td><td>{valueToInput(persistedValue, parameter.value_type)}</td>
+                      <td>{parameterInput(parameter, valueText, Boolean(parameterDisabledReason), (nextValue) =>
                           setStaged((current) => ({ ...current, [key]: { parameter, valueText: nextValue } })),
-                        )}
-                        <div className="parameter-actions">
-                          <button
-                            type="button"
-                            disabled={!stagedEdit || Boolean(error) || Boolean(writeDisabledReason)}
-                            onClick={() => void applyKeys([key])}
-                          >
-                            Apply
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!stagedEdit}
-                            onClick={() =>
+                        )}{error ? <p className="control-reason">{error}</p> : null}</td>
+                      <td><div className="status-tags">{parameterFlags(parameter, stagedEdit, activeValue, persistedValue).map((flag) => <span key={flag}>{flag}</span>)}</div></td>
+                      <td><div className="parameter-actions">
+                          <DisabledControl reason={applyReason}><button type="button" disabled={Boolean(applyReason)} onClick={() => void applyKeys([key])}>Apply</button></DisabledControl>
+                          <DisabledControl reason={!stagedEdit ? "No local edit to reset." : undefined}><button type="button" disabled={!stagedEdit} onClick={() =>
                               setStaged((current) => {
                                 const next = { ...current };
                                 delete next[key];
                                 return next;
-                              })
-                            }
-                          >
-                            Reset
-                          </button>
-                          {error ? <p className="control-reason">{error}</p> : null}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ))}
-            </section>
-          ))}
+                              })}>Reset</button></DisabledControl>
+                        </div></td>
+                    </tr>;
+              })}
+              {filteredRows.length === 0 ? <tr><td colSpan={9}>No parameters match current search and filters.</td></tr> : null}
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -218,7 +217,7 @@ export function ConfigurationPage({
           <div className="inline-actions">
             <button
               type="button"
-              disabled={stagedEdits.length === 0 || invalidEditCount > 0 || Boolean(writeDisabledReason)}
+              disabled={stagedEdits.length === 0 || invalidEditCount > 0 || blockedEditCount > 0}
               onClick={() => void applyKeys(Object.keys(staged))}
             >
               Apply all
@@ -231,15 +230,16 @@ export function ConfigurationPage({
         <p className="control-hint">
           {stagedEdits.length} frontend-only edit{stagedEdits.length === 1 ? "" : "s"} staged
           {invalidEditCount > 0 ? `, ${invalidEditCount} invalid` : ""}.
+          {blockedEditCount > 0 ? ` ${blockedEditCount} blocked by the current system/flight gate.` : ""}
         </p>
       </section>
 
       <section className="workflow-section">
         <div className="workflow-section__heading">
           <h3>Snapshots</h3>
-          <button type="button" disabled={Boolean(downloadDisabledReason)} onClick={() => void run("configuration.snapshot.list", undefined, "Snapshot list refreshed")}>
+          <DisabledControl reason={downloadDisabledReason}><button type="button" disabled={Boolean(downloadDisabledReason)} onClick={() => void run("configuration.snapshot.list", undefined, "Snapshot list refreshed")}>
             Refresh list
-          </button>
+          </button></DisabledControl>
         </div>
         <form className="inline-actions" onSubmit={saveSnapshot}>
           <label className="compact-field" htmlFor="snapshot-label">
@@ -253,13 +253,13 @@ export function ConfigurationPage({
               }}
             />
           </label>
-          <button type="submit" disabled={!snapshotLabel.trim() || Boolean(writeDisabledReason)}>
+          <DisabledControl reason={writeDisabledReason ?? (!snapshotLabel.trim() ? "Enter a snapshot label." : undefined)}><button type="submit" disabled={!snapshotLabel.trim() || Boolean(writeDisabledReason)}>
             Save snapshot
-          </button>
+          </button></DisabledControl>
           {overwriteSnapshotId ? (
-            <button type="submit" disabled={Boolean(writeDisabledReason)}>
+            <DisabledControl reason={writeDisabledReason}><button type="submit" disabled={Boolean(writeDisabledReason)}>
               Confirm overwrite
-            </button>
+            </button></DisabledControl>
           ) : null}
         </form>
         {overwriteSnapshotId ? <p className="control-reason">Overwrite existing snapshot {overwriteSnapshotId}?</p> : null}
@@ -275,13 +275,13 @@ export function ConfigurationPage({
                   {snapshot.is_default ? <span>default</span> : null}
                 </div>
               </div>
-              <button
+              <DisabledControl reason={downloadDisabledReason}><button
                 type="button"
                 disabled={Boolean(downloadDisabledReason)}
                 onClick={() => void run("configuration.snapshot.download", { snapshot_id: snapshot.snapshot_id }, `Snapshot ${snapshot.label} downloaded`)}
               >
                 Download
-              </button>
+              </button></DisabledControl>
               <PressAndHoldButton
                 label="Load"
                 disabledReason={writeDisabledReason}
@@ -316,6 +316,9 @@ function configurationManifest(state: RuntimeStoreState): ConfigurationManifest 
       non_default: Boolean(state.domains.configuration?.non_default),
       loaded_snapshot_id: state.domains.configuration?.active_snapshot_id ?? null,
       default_snapshot_id: null,
+      configuration_server_available: false,
+      pending_restart: false,
+      pending_constant_names: [],
       badges: [],
     },
   };
@@ -346,6 +349,9 @@ function configurationBadges(
   if (hasFrontendEdits) {
     badges.push("Pending edits");
   }
+  if (manifest.status?.pending_restart) {
+    badges.push("Restart required");
+  }
   if (unsaved) {
     badges.push("Unsaved");
   } else if (nonDefault) {
@@ -354,28 +360,54 @@ function configurationBadges(
   return badges;
 }
 
-function filterNodes(manifest: ConfigurationManifest, query: string): NonNullable<ConfigurationManifest["nodes"]> {
+type ParameterRow = { nodeLabel: string; groupLabel: string; parameter: ParameterDefinition };
+
+function parameterRows(manifest: ConfigurationManifest): ParameterRow[] {
+  return (manifest.nodes ?? []).flatMap((node) => (node.groups ?? []).flatMap((group) => (group.parameters ?? []).map((parameter) => ({
+    nodeLabel: node.label || node.node_id,
+    groupLabel: group.label || group.group_id,
+    parameter,
+  }))));
+}
+
+function filterParameterRows(rows: ParameterRow[], query: string, node: string, group: string, mutability: string): ParameterRow[] {
   const normalized = query.trim().toLowerCase();
-  if (!normalized) {
-    return manifest.nodes ?? [];
-  }
-  return (manifest.nodes ?? [])
-    .map((node) => ({
-      ...node,
-      groups: (node.groups ?? [])
-        .map((group) => ({
-          ...group,
-          parameters: (group.parameters ?? []).filter((parameter) =>
-            [node.label, node.node_id, group.label, group.group_id, parameter.name, parameter.description, parameter.reference]
-              .filter(Boolean)
-              .join(" ")
-              .toLowerCase()
-              .includes(normalized),
-          ),
-        }))
-        .filter((group) => (group.parameters ?? []).length > 0),
-    }))
-    .filter((node) => (node.groups ?? []).length > 0);
+  return rows.filter((row) => {
+    const parameter = row.parameter;
+    const flags = parameterFlags(parameter, undefined, parameter.active_value ?? parameter.current_value, parameter.persisted_value ?? parameter.current_value);
+    const searchable = [row.nodeLabel, parameter.node_id, row.groupLabel, parameter.group_id, parameter.name, parameter.description, parameter.value_type, parameter.reference, flags.join(" "), ...(parameter.constraints?.choices ?? []).map(String)].filter(Boolean).join(" ").toLowerCase();
+    const mutabilityMatches = mutability === "all" || (mutability === "constant" && parameter.constant) || (mutability === "readonly" && parameter.readonly) || (mutability === "runtime" && !parameter.constant && !parameter.readonly);
+    return (!normalized || searchable.includes(normalized)) && (node === "all" || row.nodeLabel === node) && (group === "all" || row.groupLabel === group) && mutabilityMatches;
+  });
+}
+
+function uniqueOptions(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function parameterFlags(parameter: ParameterDefinition, stagedEdit: StagedEdit | undefined, activeValue: unknown, persistedValue: unknown): string[] {
+  const flags = [parameter.readonly ? "read-only" : parameter.constant ? "constant" : "runtime-editable"];
+  if (parameter.restart_required && parameter.restart_required !== "none") flags.push(`restart: ${parameter.restart_required}`);
+  if (stagedEdit) flags.push("pending");
+  if (valueChanged(activeValue, persistedValue)) flags.push("restart required");
+  if (valueChanged(parameter.current_value, parameter.loaded_value)) flags.push("unsaved");
+  else if (valueChanged(parameter.loaded_value, parameter.default_value)) flags.push("non-default");
+  if (parameter.apply_allowed === false) flags.push("apply blocked");
+  return flags;
+}
+
+function parameterConstraintSummary(parameter: ParameterDefinition): string {
+  const constraints = parameter.constraints;
+  if (!constraints) return "none";
+  return [
+    constraints.unit ? `unit ${constraints.unit}` : null,
+    constraints.minimum != null ? `min ${constraints.minimum}` : null,
+    constraints.maximum != null ? `max ${constraints.maximum}` : null,
+    constraints.step != null ? `step ${constraints.step}` : null,
+    constraintExpressionSummary(parameter),
+    constraints.choices?.length ? `choices ${constraints.choices.map(String).join(", ")}` : null,
+    constraints.regex ? `pattern ${constraints.regex}` : null,
+  ].filter(Boolean).join("; ") || "none";
 }
 
 function parameterInput(
@@ -418,6 +450,15 @@ function parameterInput(
       step={parameter.constraints?.step ?? (parameter.value_type === "integer" ? 1 : undefined)}
     />
   );
+}
+
+function constraintExpressionSummary(parameter: ParameterDefinition): string | null {
+  const expressions = [
+    parameter.constraints?.minimum_expression ? `min ${parameter.constraints.minimum_expression}` : null,
+    parameter.constraints?.maximum_expression ? `max ${parameter.constraints.maximum_expression}` : null,
+    parameter.constraints?.step_expression ? `step ${parameter.constraints.step_expression}` : null,
+  ].filter(Boolean);
+  return expressions.length > 0 ? `Server constraint: ${expressions.join(", ")}` : null;
 }
 
 function parameterEditPayload(parameter: ParameterDefinition, valueText: string) {
@@ -501,15 +542,6 @@ function parameterInputId(parameter: ParameterDefinition): string {
   return `parameter-${parameterKey(parameter).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
-function restartSummary(parameters: ParameterDefinition[]): string {
-  const nodeCount = parameters.filter((parameter) => parameter.restart_required === "node").length;
-  const runtimeCount = parameters.filter((parameter) => parameter.restart_required === "runtime").length;
-  if (nodeCount + runtimeCount === 0) {
-    return "no restart";
-  }
-  return `${nodeCount} node / ${runtimeCount} runtime restart`;
-}
-
 function valueChanged(left: unknown, right: unknown): boolean {
   return JSON.stringify(left ?? null) !== JSON.stringify(right ?? null);
 }
@@ -535,6 +567,19 @@ function configurationWriteDisabledReason(state: RuntimeStoreState): string | un
     if (allowed === false && Array.isArray(rejections) && rejections.length > 0) {
       return rejections.map(String).join("; ");
     }
+  }
+  return undefined;
+}
+
+function parameterApplyDisabledReason(parameter: ParameterDefinition, state: RuntimeStoreState): string | undefined {
+  if (state.connection.commands_disabled_reason) {
+    return state.connection.commands_disabled_reason;
+  }
+  if (parameter.readonly) {
+    return "Parameter is read-only.";
+  }
+  if (parameter.apply_allowed === false) {
+    return (parameter.apply_rejection_reasons ?? []).join("; ") || "Parameter update is not allowed in the current state.";
   }
   return undefined;
 }

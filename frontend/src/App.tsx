@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import { type RuntimeIdentity } from "./api/contracts";
-import { createRuntimeCommandDispatcher } from "./api/commands";
+import { createPendingCommandTracker, createRuntimeCommandDispatcher, preventPendingCommandDuplicates, requireAuthoritativeRuntimeState } from "./api/commands";
+import { createRuntimeLogsClient } from "./api/logs";
 import { configuredProxyUrl, fetchProxyHealth } from "./api/runtimeProxy";
 import type { WebSocketMessage } from "./generated/contracts";
 import { AppShell } from "./layout";
@@ -20,12 +21,27 @@ export function App() {
   const [authenticated, setAuthenticated] = useState(false);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [runtimeState, dispatchRuntimeState] = useReducer(runtimeStoreReducer, initialRuntimeStoreState);
-  const commandDispatcher = useMemo(
+  const [pendingCommandTracker] = useState(createPendingCommandTracker);
+  const baseCommandDispatcher = useMemo(
     () => createRuntimeCommandDispatcher(proxyUrl, () => sessionToken),
     [proxyUrl, sessionToken],
   );
+  const commandDispatcher = useMemo(
+    () => requireAuthoritativeRuntimeState(
+      preventPendingCommandDuplicates(baseCommandDispatcher, () => runtimeState.command_results, pendingCommandTracker),
+      () => ({
+        allowed: runtimeState.connection.connected && !runtimeState.connection.commands_disabled_reason,
+        reason: runtimeState.connection.commands_disabled_reason,
+      }),
+    ),
+    [baseCommandDispatcher, pendingCommandTracker, runtimeState],
+  );
+  const logsClient = useMemo(
+    () => createRuntimeLogsClient(proxyUrl, () => sessionToken),
+    [proxyUrl, sessionToken],
+  );
   const handleRuntimeConnected = useCallback(() => {
-    dispatchRuntimeState({ type: "connected" });
+    dispatchRuntimeState({ type: "disconnected", reason: "Connected; awaiting authoritative runtime state snapshot." });
   }, []);
   const handleRuntimeDisconnected = useCallback((reason: string) => {
     dispatchRuntimeState({ type: "disconnected", reason });
@@ -33,6 +49,14 @@ export function App() {
   const handleRuntimeMessage = useCallback((message: WebSocketMessage) => {
     dispatchRuntimeState({ type: "websocket_message", message });
   }, []);
+  const handleGlobalHold = useCallback(
+    () => commandDispatcher("px4.hold"),
+    [commandDispatcher],
+  );
+  const handleGlobalOperationCancel = useCallback(
+    () => commandDispatcher("custom_operation.cancel"),
+    [commandDispatcher],
+  );
 
   useEffect(() => {
     let active = true;
@@ -76,7 +100,16 @@ export function App() {
           onRuntimeDisconnected={handleRuntimeDisconnected}
           onRuntimeMessage={handleRuntimeMessage}
         />
-        {authenticated ? <AppShell state={runtimeState} mapState={runtimeState.domains.map} dispatchCommand={commandDispatcher} /> : null}
+        {authenticated ? (
+          <AppShell
+            state={runtimeState}
+            mapState={runtimeState.domains.map}
+            dispatchCommand={commandDispatcher}
+            logsClient={logsClient}
+            onHold={handleGlobalHold}
+            onCancelOperation={handleGlobalOperationCancel}
+          />
+        ) : null}
       </section>
     </main>
   );

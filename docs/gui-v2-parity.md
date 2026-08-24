@@ -84,7 +84,7 @@ Coverage states:
 | `put_img()` Matplotlib powerline visualization rendered into `label_viz` | Map page and dashboard mini-map using `MapState` stored overview, live perception, drone trail, target history, and trajectory layers | Covered |
 | PL mapper state, PL direction computer status, Hough transformer status | Perception page diagnostics | Covered |
 | Stored powerline overview status and update action | Perception page and Map page stored overview layer | Covered |
-| High-bandwidth camera/video stream | Deferred camera/video item. GUI v2 shows a disabled scope panel only; no stream endpoint, player, or WebRTC/MJPEG transport is implemented | Deferred |
+| High-bandwidth camera/video stream | Intentionally absent. GUI v2 transports typed vector geometry and provides spatial plus orthogonal projection-plane views; no placeholder, stream endpoint, player, WebRTC, or MJPEG transport exists | Deferred |
 
 ## Parity Review Result
 
@@ -96,8 +96,13 @@ No current Tk GUI diagnostic or command is silently dropped:
 - `gui_original.py` workflows that were already removed/commented in the
   current Tk GUI are either superseded by safer v2 workflows or explicitly
   deferred above.
-- Camera/video streaming is the only visualization item intentionally deferred
-  for v2, matching the GUI v2 scope decision.
+- Camera/video streaming is intentionally out of scope. Inspection acceptance
+  depends on fresh typed vector geometry in both required views, not subsystem
+  parity alone.
+
+Inspection workflow completeness is accepted only through
+[`gui-v2-real-profile-acceptance.md`](gui-v2-real-profile-acceptance.md) and the
+authoritative [`field-inspection-operations.md`](../../../docs/field-inspection-operations.md).
 
 ## Future Stream Metadata
 

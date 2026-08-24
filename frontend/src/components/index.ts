@@ -3,6 +3,7 @@ export {
   CommandEventEntry,
   CommandResultNotice,
   CriticalWarningBanner,
+  DisabledControl,
   DisabledReason,
   PRESS_AND_HOLD_DURATION_MS,
   PressAndHoldButton,

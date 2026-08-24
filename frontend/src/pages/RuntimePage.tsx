@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  DisabledControl,
   PressAndHoldButton,
   ToastRegion,
   type CommandResult,
@@ -15,6 +16,7 @@ const RUNTIME_COMMANDS = {
   start: "runtime.start",
   stop: "runtime.stop",
   restart: "runtime.restart",
+  parameterColdRestart: "runtime.parameter_cold_restart",
   shutdown: "runtime.shutdown",
   status: "runtime.status",
   listEntities: "runtime.list_entities",
@@ -41,29 +43,43 @@ type RuntimeInventoryRow = {
 
 export function RuntimePage({ state, dispatchCommand, onOpenLogs = () => undefined }: RuntimePageProps) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [restartMode, setRestartMode] = useState<"warm" | "cold">("warm");
+  const [coldRestart, setColdRestart] = useState(false);
   const [refreshedNodes, setRefreshedNodes] = useState<RuntimeInventoryRow[] | null>(null);
   const [refreshedServices, setRefreshedServices] = useState<RuntimeInventoryRow[] | null>(null);
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+  const [includeDependencies, setIncludeDependencies] = useState(false);
+  const [nodePage, setNodePage] = useState(1);
+  const [servicePage, setServicePage] = useState(1);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const [pendingMutation, setPendingMutation] = useState<string | null>(null);
   const inventoryRefreshInFlightRef = useRef(false);
-  const readDisabledReason = state.connection.commands_disabled_reason;
+  const initialRefreshStartedRef = useRef(false);
+  const pendingMutationRef = useRef(new Set<string>());
+  const readDisabledReason = state.connection.commands_disabled_reason ?? undefined;
   const nodes = refreshedNodes ?? runtimeNodes(state);
   const services = refreshedServices ?? runtimeServices(state);
+  const selectedNodeIds = selectedNodes.filter((id) => nodes.some((node) => node.id === id));
   const runtimeMutationReasons = runtimeMutationDisabledReasons(state);
   const serviceMutationDisabledReason = runtimeSafetyDisabledReason(state);
-
+  const parameterRestartDisabledReason = parameterColdRestartDisabledReason(state);
+  const pendingConstantNames = configurationPendingConstantNames(state);
+  const mutationBusyReason = pendingMutation ? "A runtime lifecycle command is pending." : undefined;
+  const gated = (reason?: string | null) => mutationBusyReason ?? reason ?? undefined;
   useEffect(() => {
     if (readDisabledReason) {
       return undefined;
     }
-
     let cancelled = false;
     const refreshInventories = async () => {
       if (inventoryRefreshInFlightRef.current) {
         return;
       }
       inventoryRefreshInFlightRef.current = true;
+      setInventoryLoading(true);
       try {
         const results = await Promise.allSettled([
+          dispatchCommand(RUNTIME_COMMANDS.status),
           dispatchCommand(RUNTIME_COMMANDS.listEntities),
           dispatchCommand(RUNTIME_COMMANDS.listServices),
         ]);
@@ -71,16 +87,26 @@ export function RuntimePage({ state, dispatchCommand, onOpenLogs = () => undefin
           return;
         }
         if (results[0].status === "fulfilled") {
-          applyRuntimeCommandResult(RUNTIME_COMMANDS.listEntities, results[0].value, setRefreshedNodes, setRefreshedServices);
+          applyRuntimeCommandResult(RUNTIME_COMMANDS.status, results[0].value, setRefreshedNodes, setRefreshedServices);
         }
         if (results[1].status === "fulfilled") {
-          applyRuntimeCommandResult(RUNTIME_COMMANDS.listServices, results[1].value, setRefreshedNodes, setRefreshedServices);
+          applyRuntimeCommandResult(RUNTIME_COMMANDS.listEntities, results[1].value, setRefreshedNodes, setRefreshedServices);
         }
+        if (results[2].status === "fulfilled") {
+          applyRuntimeCommandResult(RUNTIME_COMMANDS.listServices, results[2].value, setRefreshedNodes, setRefreshedServices);
+        }
+        const failure = results.find((result) => result.status === "rejected");
+        setInventoryError(failure?.status === "rejected" ? String(failure.reason) : null);
       } finally {
         inventoryRefreshInFlightRef.current = false;
+        if (!cancelled) setInventoryLoading(false);
       }
     };
 
+    if (!initialRefreshStartedRef.current) {
+      initialRefreshStartedRef.current = true;
+      void refreshInventories();
+    }
     const refreshTimer = setInterval(() => void refreshInventories(), INVENTORY_AUTO_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
@@ -89,14 +115,24 @@ export function RuntimePage({ state, dispatchCommand, onOpenLogs = () => undefin
   }, [dispatchCommand, readDisabledReason]);
 
   async function runCommand(commandId: string, parameters?: Record<string, unknown>) {
+    const key = `${commandId}:${JSON.stringify(parameters ?? {})}`;
+    if (pendingMutationRef.current.has(key)) return;
+    pendingMutationRef.current.add(key);
+    setPendingMutation(key);
     try {
       const response = await dispatchCommand(commandId, parameters);
       applyRuntimeCommandResult(commandId, response, setRefreshedNodes, setRefreshedServices);
       const result = commandResponseToResult(response);
       setToasts((current) => [...current, { ...result, autoDismissMs: response.accepted ? 2400 : undefined }]);
+      if (response.accepted && isRuntimeMutation(commandId)) {
+        await refreshInventory(dispatchCommand, setRefreshedNodes, setRefreshedServices);
+      }
     } catch (error) {
       const result = errorToResult(commandId, error);
       setToasts((current) => [...current, result]);
+    } finally {
+      pendingMutationRef.current.delete(key);
+      setPendingMutation(null);
     }
   }
 
@@ -105,6 +141,7 @@ export function RuntimePage({ state, dispatchCommand, onOpenLogs = () => undefin
       <section className="workflow-section">
         <div className="workflow-section__heading">
           <h3>Runtime Status</h3>
+          <DisabledControl reason={readDisabledReason}>
           <button
             type="button"
             disabled={Boolean(readDisabledReason)}
@@ -112,6 +149,7 @@ export function RuntimePage({ state, dispatchCommand, onOpenLogs = () => undefin
           >
             Refresh status
           </button>
+          </DisabledControl>
         </div>
         <dl className="status-list">
           <div>
@@ -137,47 +175,55 @@ export function RuntimePage({ state, dispatchCommand, onOpenLogs = () => undefin
         </dl>
       </section>
 
+      <section className="workflow-section">
+        <div className="workflow-section__heading">
+          <h3>Parameter Restart</h3>
+          <span>{pendingConstantNames.length} pending</span>
+        </div>
+        <p className="control-hint">
+          Restarts every managed III node except the configuration server, then confirms persisted constant values are active.
+        </p>
+        {pendingConstantNames.length > 0 ? <p>{pendingConstantNames.join(", ")}</p> : null}
+        <PressAndHoldButton
+          label="Apply pending constants"
+          onConfirm={() => void runCommand(RUNTIME_COMMANDS.parameterColdRestart)}
+          disabledReason={gated(parameterRestartDisabledReason)}
+        />
+      </section>
+
       <section className="workflow-section runtime-mutations-section">
         <div className="workflow-section__heading runtime-mutation-heading">
           <h3>Runtime Mutations</h3>
-          <label className="compact-select" htmlFor="runtime-restart-mode">
-            <span>Restart mode</span>
-            <select
-              id="runtime-restart-mode"
-              value={restartMode}
-              disabled={Boolean(runtimeMutationReasons.restart)}
-              onChange={(event) => setRestartMode(event.target.value === "cold" ? "cold" : "warm")}
-            >
-              <option value="warm">Warm</option>
-              <option value="cold">Cold</option>
-            </select>
+          <label className="check-field" htmlFor="runtime-cold-restart">
+            <DisabledControl reason={gated(runtimeMutationReasons.restart)}><input aria-label="Cold restart" id="runtime-cold-restart" type="checkbox" disabled={Boolean(gated(runtimeMutationReasons.restart))} checked={coldRestart} onChange={(event) => setColdRestart(event.target.checked)} /></DisabledControl>
+            Cold restart
           </label>
         </div>
         <div className="command-grid runtime-mutation-grid">
           <PressAndHoldButton
             label="Boot"
             onConfirm={() => void runCommand(RUNTIME_COMMANDS.boot, { profile: profile(state) })}
-            disabledReason={runtimeMutationReasons.boot}
+            disabledReason={gated(runtimeMutationReasons.boot)}
           />
           <PressAndHoldButton
             label="Start"
             onConfirm={() => void runCommand(RUNTIME_COMMANDS.start)}
-            disabledReason={runtimeMutationReasons.start}
+            disabledReason={gated(runtimeMutationReasons.start)}
           />
           <PressAndHoldButton
             label="Stop"
             onConfirm={() => void runCommand(RUNTIME_COMMANDS.stop)}
-            disabledReason={runtimeMutationReasons.stop}
+            disabledReason={gated(runtimeMutationReasons.stop)}
           />
           <PressAndHoldButton
             label="Restart"
-            onConfirm={() => void runCommand(RUNTIME_COMMANDS.restart, { cold: restartMode === "cold" })}
-            disabledReason={runtimeMutationReasons.restart}
+            onConfirm={() => void runCommand(RUNTIME_COMMANDS.restart, { cold: coldRestart })}
+            disabledReason={gated(runtimeMutationReasons.restart)}
           />
           <PressAndHoldButton
             label="Shutdown"
             onConfirm={() => void runCommand(RUNTIME_COMMANDS.shutdown)}
-            disabledReason={runtimeMutationReasons.shutdown}
+            disabledReason={gated(runtimeMutationReasons.shutdown)}
           />
         </div>
       </section>
@@ -185,47 +231,30 @@ export function RuntimePage({ state, dispatchCommand, onOpenLogs = () => undefin
       <section className="workflow-section">
         <div className="workflow-section__heading">
           <h3>Managed Entities</h3>
-          <button
-            type="button"
-            disabled={Boolean(readDisabledReason)}
-            onClick={() => void runCommand(RUNTIME_COMMANDS.listEntities)}
-          >
-            Refresh entities
-          </button>
+          <div className="inline-actions"><span>Auto-refreshing every {INVENTORY_AUTO_REFRESH_INTERVAL_MS / 1000}s</span><button type="button" disabled={inventoryLoading} onClick={() => void refreshInventory(dispatchCommand, setRefreshedNodes, setRefreshedServices, setInventoryError, setInventoryLoading)}>Refresh</button></div>
         </div>
-        <DataRows
-          emptyLabel="No managed entities reported"
-          rows={nodes.map((node) => ({
-            id: node.id,
-            columns: [node.id, node.state ?? "unknown"],
-            logId: node.id,
-          }))}
-          onOpenLogs={onOpenLogs}
-        />
+        <div className="runtime-bulk-actions">
+          <strong>{selectedNodeIds.length} selected</strong>
+          <button type="button" disabled={selectedNodeIds.length === nodes.length} onClick={() => setSelectedNodes(nodes.map((node) => node.id))}>Select all {nodes.length}</button>
+          <button type="button" disabled={selectedNodeIds.length === 0} onClick={() => setSelectedNodes([])}>Clear selection</button>
+          <label className="check-field"><input type="checkbox" checked={includeDependencies} onChange={(event) => setIncludeDependencies(event.target.checked)} />Include dependencies</label>
+          <PressAndHoldButton label={`Start ${selectedNodeIds.length} selected`} disabledReason={gated(readDisabledReason ?? (selectedNodeIds.length ? undefined : "Select at least one entity."))} onConfirm={() => void runCommand(RUNTIME_COMMANDS.start, { select_nodes: selectedNodeIds, activate: true, include_dependencies: includeDependencies })} />
+          <PressAndHoldButton label={`Stop ${selectedNodeIds.length} selected`} disabledReason={gated(readDisabledReason ?? (selectedNodeIds.length ? undefined : "Select at least one entity."))} onConfirm={() => void runCommand(RUNTIME_COMMANDS.stop, { select_nodes: selectedNodeIds, cleanup: true, include_dependencies: includeDependencies })} />
+          <PressAndHoldButton label={`Restart ${selectedNodeIds.length} selected`} disabledReason={gated(readDisabledReason ?? (selectedNodeIds.length ? undefined : "Select at least one entity."))} onConfirm={() => void runCommand(RUNTIME_COMMANDS.restart, { select_nodes: selectedNodeIds, cold: coldRestart, include_dependencies: includeDependencies })} />
+          <PressAndHoldButton label={`Shutdown ${selectedNodeIds.length} selected`} disabledReason={gated(readDisabledReason ?? (selectedNodeIds.length ? undefined : "Select at least one entity."))} onConfirm={() => void runCommand(RUNTIME_COMMANDS.shutdown, { select_nodes: selectedNodeIds, include_dependencies: includeDependencies })} />
+        </div>
+        {inventoryLoading && refreshedNodes === null ? <p role="status">Loading managed entities...</p> : null}
+        {inventoryError ? <p className="control-reason" role="alert">Inventory refresh failed: {inventoryError}</p> : null}
+        <InventoryTable kind="entity" rows={nodes} page={nodePage} onPageChange={setNodePage} selected={selectedNodeIds} onSelectedChange={setSelectedNodes} onOpenLogs={onOpenLogs} disabledReason={gated(readDisabledReason)} includeDependencies={includeDependencies} coldRestart={coldRestart} runCommand={runCommand} />
       </section>
 
       <section className="workflow-section">
         <div className="workflow-section__heading">
           <h3>Daemon Services</h3>
-          <button
-            type="button"
-            disabled={Boolean(readDisabledReason)}
-            onClick={() => void runCommand(RUNTIME_COMMANDS.listServices)}
-          >
-            Refresh services
-          </button>
+          <div className="inline-actions"><span>Auto-refreshing every {INVENTORY_AUTO_REFRESH_INTERVAL_MS / 1000}s</span><button type="button" disabled={inventoryLoading} onClick={() => void refreshInventory(dispatchCommand, setRefreshedNodes, setRefreshedServices, setInventoryError, setInventoryLoading)}>Refresh</button></div>
         </div>
-        <div className="service-list">
-          {services.length === 0 ? <p>No daemon services reported</p> : null}
-          {services.map((service) => (
-            <ServiceRow
-              key={service.id}
-              service={service}
-              disabledReason={serviceMutationDisabledReason}
-              runCommand={runCommand}
-            />
-          ))}
-        </div>
+        {inventoryLoading && refreshedServices === null ? <p role="status">Loading daemon services...</p> : null}
+        <InventoryTable kind="service" rows={services} page={servicePage} onPageChange={setServicePage} onOpenLogs={onOpenLogs} disabledReason={gated(serviceMutationDisabledReason)} includeDependencies={false} coldRestart={false} runCommand={runCommand} />
       </section>
 
       <ToastRegion toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
@@ -233,73 +262,61 @@ export function RuntimePage({ state, dispatchCommand, onOpenLogs = () => undefin
   );
 }
 
-function ServiceRow({
-  service,
-  disabledReason,
-  runCommand,
-}: {
-  service: RuntimeInventoryRow;
+const INVENTORY_PAGE_SIZE = 10;
+
+function InventoryTable({ kind, rows, page, onPageChange, selected = [], onSelectedChange, onOpenLogs, disabledReason, includeDependencies, coldRestart, runCommand }: {
+  kind: "entity" | "service";
+  rows: RuntimeInventoryRow[];
+  page: number;
+  onPageChange: (page: number) => void;
+  selected?: string[];
+  onSelectedChange?: (ids: string[]) => void;
+  onOpenLogs: (entityId?: string) => void;
   disabledReason?: string;
+  includeDependencies: boolean;
+  coldRestart: boolean;
   runCommand: (commandId: string, parameters?: Record<string, unknown>) => Promise<void>;
 }) {
-  const reasons = serviceMutationDisabledReasons(service, disabledReason);
+  const pages = Math.max(1, Math.ceil(rows.length / INVENTORY_PAGE_SIZE));
+  const safePage = Math.min(page, pages);
+  const visibleRows = rows.slice((safePage - 1) * INVENTORY_PAGE_SIZE, safePage * INVENTORY_PAGE_SIZE);
+  const toggle = (id: string) => onSelectedChange?.(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
+  const visibleIds = visibleRows.map((row) => row.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
+  const someVisibleSelected = visibleIds.some((id) => selected.includes(id));
+  const selectVisible = () => onSelectedChange?.(allVisibleSelected ? selected.filter((id) => !visibleIds.includes(id)) : [...new Set([...selected, ...visibleIds])]);
   return (
-    <article className="service-row">
-      <div>
-        <strong>{service.id}</strong>
-        <span>{service.state ?? "unknown"}</span>
-      </div>
-      <PressAndHoldButton
-        label="Start service"
-        onConfirm={() => void runCommand(RUNTIME_COMMANDS.serviceStart, { service_id: service.id })}
-        disabledReason={reasons.start}
-      />
-      <PressAndHoldButton
-        label="Stop service"
-        onConfirm={() => void runCommand(RUNTIME_COMMANDS.serviceStop, { service_id: service.id })}
-        disabledReason={reasons.stop}
-      />
-      <PressAndHoldButton
-        label="Restart service"
-        onConfirm={() => void runCommand(RUNTIME_COMMANDS.serviceRestart, { service_id: service.id })}
-        disabledReason={reasons.restart}
-      />
-    </article>
+    <div className="inventory-table-wrap">
+      <table className="data-table inventory-table">
+        <thead><tr>{kind === "entity" ? <th scope="col"><SelectionCheckbox label="Select current page" checked={allVisibleSelected} mixed={!allVisibleSelected && someVisibleSelected} onChange={selectVisible} /></th> : null}<th scope="col">Name</th><th scope="col">State</th><th scope="col">Actions</th></tr></thead>
+        <tbody>
+          {visibleRows.length === 0 ? <tr><td colSpan={kind === "entity" ? 4 : 3}>No managed {kind === "entity" ? "entities" : "services"} reported</td></tr> : null}
+          {visibleRows.map((row) => {
+            const reasons = serviceMutationDisabledReasons(row, disabledReason);
+            const parameters = kind === "entity" ? { select_nodes: [row.id], include_dependencies: includeDependencies } : { service_id: row.id };
+            const commands = kind === "entity" ? [RUNTIME_COMMANDS.start, RUNTIME_COMMANDS.stop, RUNTIME_COMMANDS.restart] : [RUNTIME_COMMANDS.serviceStart, RUNTIME_COMMANDS.serviceStop, RUNTIME_COMMANDS.serviceRestart];
+            return <tr key={row.id}>
+              {kind === "entity" ? <td><input type="checkbox" aria-label={`Select ${row.id}`} checked={selected.includes(row.id)} onChange={() => toggle(row.id)} /></td> : null}
+              <th scope="row">{row.id}</th><td>{row.state ?? "unknown"}</td>
+              <td><div className="table-actions">
+                <PressAndHoldButton label={kind === "service" ? "Start service" : "Start"} disabledReason={reasons.start} onConfirm={() => void runCommand(commands[0], { ...parameters, activate: true })} />
+                <PressAndHoldButton label={kind === "service" ? "Stop service" : "Stop"} disabledReason={reasons.stop} onConfirm={() => void runCommand(commands[1], { ...parameters, cleanup: true })} />
+                <PressAndHoldButton label={kind === "service" ? "Restart service" : "Restart"} disabledReason={reasons.restart} onConfirm={() => void runCommand(commands[2], { ...parameters, cold: coldRestart })} />
+                <button type="button" onClick={() => onOpenLogs(row.id)}>Logs</button>
+              </div></td>
+            </tr>;
+          })}
+        </tbody>
+      </table>
+      <div className="pagination-controls"><span>{rows.length ? `${(safePage - 1) * INVENTORY_PAGE_SIZE + 1}-${Math.min(safePage * INVENTORY_PAGE_SIZE, rows.length)} of ${rows.length}` : "0 results"} / Page {safePage} of {pages}</span><button type="button" disabled={safePage <= 1} onClick={() => onPageChange(safePage - 1)}>Previous</button><button type="button" disabled={safePage >= pages} onClick={() => onPageChange(safePage + 1)}>Next</button></div>
+    </div>
   );
 }
 
-type DataRow = {
-  id: string;
-  columns: string[];
-  logId: string;
-};
-
-function DataRows({
-  rows,
-  emptyLabel,
-  onOpenLogs,
-}: {
-  rows: DataRow[];
-  emptyLabel: string;
-  onOpenLogs: (entityId?: string) => void;
-}) {
-  if (rows.length === 0) {
-    return <p>{emptyLabel}</p>;
-  }
-  return (
-    <div className="data-rows">
-      {rows.map((row) => (
-        <article className="data-row" key={row.id}>
-          {row.columns.map((column) => (
-            <span key={column}>{column}</span>
-          ))}
-          <button type="button" onClick={() => onOpenLogs(row.logId)}>
-            Logs
-          </button>
-        </article>
-      ))}
-    </div>
-  );
+function SelectionCheckbox({ label, checked, mixed, onChange }: { label: string; checked: boolean; mixed: boolean; onChange: () => void }) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = mixed; }, [mixed]);
+  return <input ref={ref} type="checkbox" aria-label={label} checked={checked} onChange={onChange} />;
 }
 
 type RuntimeMutationDisabledReasons = {
@@ -341,11 +358,15 @@ function serviceMutationDisabledReasons(
       restart: "Service is not running.",
     };
   }
-  return {
-    start: "Service running state is unknown.",
-    stop: "Service running state is unknown.",
-    restart: "Service running state is unknown.",
-  };
+  const state = service.state?.toLowerCase() ?? "";
+  if (["active", "running", "ready", "alive"].some((label) => state.includes(label))) {
+    return { start: "Entity is already active.", stop: undefined, restart: undefined };
+  }
+  if (["inactive", "stopped", "dead", "unconfigured", "finalized"].some((label) => state.includes(label))) {
+    return { start: undefined, stop: "Entity is not active.", restart: "Entity is not active." };
+  }
+  const reason = "Lifecycle state is unknown; refresh inventory before changing it.";
+  return { start: reason, stop: reason, restart: reason };
 }
 
 function runtimeSafetyDisabledReason(state: RuntimeStoreState): string | undefined {
@@ -399,14 +420,58 @@ function runtimeMutationDisabledReasons(state: RuntimeStoreState): RuntimeMutati
   };
 }
 
+function configurationPendingConstantNames(state: RuntimeStoreState): string[] {
+  const manifest = state.domains.configuration?.latest?.manifest;
+  if (!manifest || typeof manifest !== "object") {
+    return [];
+  }
+  const status = (manifest as { status?: { pending_constant_names?: unknown } }).status;
+  return Array.isArray(status?.pending_constant_names) ? status.pending_constant_names.map(String) : [];
+}
+
+function parameterColdRestartDisabledReason(state: RuntimeStoreState): string | undefined {
+  if (state.connection.commands_disabled_reason) {
+    return state.connection.commands_disabled_reason;
+  }
+  const configuration = state.domains.configuration;
+  if (configuration?.source_availability !== "available" || configuration.freshness !== "fresh") {
+    return "Configuration server state is unavailable or stale.";
+  }
+  if (configurationPendingConstantNames(state).length === 0) {
+    return "No constant parameter changes are pending.";
+  }
+  if (state.domains.mission?.mission_state === "active" || state.domains.mission?.latest?.mission_active === true) {
+    return "Configuration changes are disabled in Mission mode.";
+  }
+  const vehicle = state.domains.vehicle;
+  if (vehicle?.freshness !== "fresh" || vehicle.source_availability !== "available") {
+    return "Vehicle state is unavailable or stale.";
+  }
+  if (vehicle.armed !== false || vehicle.in_air !== false) {
+    return "Parameter cold restart requires the aircraft to be disarmed and landed.";
+  }
+  return undefined;
+}
+
 function commandResponseToResult(response: CommandResponse): CommandResult {
   return {
     id: response.request_id,
     severity: response.accepted ? "success" : "danger",
     title: response.accepted ? "Command accepted" : "Command rejected",
-    message: response.rejection?.message ?? response.message ?? response.command_id,
+    message: response.rejection?.message ?? response.message ?? daemonResultSummary(response.result) ?? response.command_id,
     timestamp: response.timestamp,
   };
+}
+
+function daemonResultSummary(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  const daemon = (result as Record<string, unknown>).daemon;
+  if (!daemon || typeof daemon !== "object") return null;
+  const record = daemon as Record<string, unknown>;
+  const failed = record.failed_nodes ?? record.failures ?? record.failed;
+  const succeeded = record.succeeded_nodes ?? record.successes ?? record.succeeded;
+  if (failed || succeeded) return `Succeeded: ${JSON.stringify(succeeded ?? [])}; failed: ${JSON.stringify(failed ?? [])}`;
+  return typeof record.message === "string" ? record.message : null;
 }
 
 function errorToResult(commandId: string, error: unknown): CommandResult {
@@ -424,7 +489,7 @@ function applyRuntimeCommandResult(
   setNodes: (rows: RuntimeInventoryRow[]) => void,
   setServices: (rows: RuntimeInventoryRow[]) => void,
 ) {
-  if (!response.accepted) {
+  if (!response?.accepted) {
     return;
   }
   if (commandId === RUNTIME_COMMANDS.listEntities) {
@@ -445,6 +510,34 @@ function applyRuntimeCommandResult(
       setServices(services);
     }
   }
+}
+
+async function refreshInventory(
+  dispatchCommand: RuntimeCommandDispatcher,
+  setNodes: (rows: RuntimeInventoryRow[]) => void,
+  setServices: (rows: RuntimeInventoryRow[]) => void,
+  setError?: (error: string | null) => void,
+  setLoading?: (loading: boolean) => void,
+) {
+  setLoading?.(true);
+  try {
+    const results = await Promise.allSettled([
+      dispatchCommand(RUNTIME_COMMANDS.status),
+      dispatchCommand(RUNTIME_COMMANDS.listEntities),
+      dispatchCommand(RUNTIME_COMMANDS.listServices),
+    ]);
+    if (results[0].status === "fulfilled") applyRuntimeCommandResult(RUNTIME_COMMANDS.status, results[0].value, setNodes, setServices);
+    if (results[1].status === "fulfilled") applyRuntimeCommandResult(RUNTIME_COMMANDS.listEntities, results[1].value, setNodes, setServices);
+    if (results[2].status === "fulfilled") applyRuntimeCommandResult(RUNTIME_COMMANDS.listServices, results[2].value, setNodes, setServices);
+    const failure = results.find((result) => result.status === "rejected");
+    setError?.(failure?.status === "rejected" ? String(failure.reason) : null);
+  } finally {
+    setLoading?.(false);
+  }
+}
+
+function isRuntimeMutation(commandId: string): boolean {
+  return ![RUNTIME_COMMANDS.status, RUNTIME_COMMANDS.listEntities, RUNTIME_COMMANDS.listServices].includes(commandId as never);
 }
 
 function extractRows(response: CommandResponse, key: "managed_nodes" | "services"): RuntimeInventoryRow[] {

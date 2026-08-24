@@ -8,6 +8,7 @@ import {
   CommandEventEntry,
   CommandResultNotice,
   CriticalWarningBanner,
+  DisabledControl,
   NumericField,
   PRESS_AND_HOLD_DURATION_MS,
   PressAndHoldButton,
@@ -30,17 +31,29 @@ describe("interaction primitives", () => {
       vi.advanceTimersByTime(PRESS_AND_HOLD_DURATION_MS - 1);
     });
     expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("progressbar", { name: "Arm hold progress" })).not.toHaveAttribute(
+      "aria-valuenow",
+      "100",
+    );
 
     act(() => {
       vi.advanceTimersByTime(1);
     });
     expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Arm" })).toHaveClass("critical-button--sent");
+    expect(screen.getByRole("button", { name: "Arm" })).toHaveTextContent("Arm - command sent");
     expect(screen.getByRole("progressbar", { name: "Arm hold progress" })).toHaveAttribute(
       "aria-valuenow",
       "100",
     );
+    expect(screen.getByRole("progressbar", { name: "Arm hold progress" })).toHaveAttribute(
+      "aria-valuetext",
+      "Command sent",
+    );
 
     fireEvent.pointerUp(screen.getByRole("button", { name: "Arm" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Arm" })).not.toHaveClass("critical-button--sent");
     expect(screen.getByRole("progressbar", { name: "Arm hold progress" })).toHaveAttribute(
       "aria-valuenow",
       "0",
@@ -60,6 +73,25 @@ describe("interaction primitives", () => {
     expect(screen.getByText("Press and hold for 1.5 seconds.")).toBeInTheDocument();
   });
 
+  it("cancels without dispatch when released before the bar is full", () => {
+    vi.useFakeTimers();
+    const onConfirm = vi.fn();
+    render(<PressAndHoldButton label="Land" onConfirm={onConfirm} />);
+
+    const button = screen.getByRole("button", { name: "Land" });
+    fireEvent.pointerDown(button);
+    act(() => {
+      vi.advanceTimersByTime(PRESS_AND_HOLD_DURATION_MS - 1);
+    });
+    fireEvent.pointerUp(button);
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("progressbar", { name: "Land hold progress" })).toHaveAttribute("aria-valuenow", "0");
+  });
+
   it("displays disabled reasons and blocks disabled critical controls", () => {
     const onConfirm = vi.fn();
     render(
@@ -76,7 +108,34 @@ describe("interaction primitives", () => {
     expect(screen.getByText("Vehicle state is unknown")).toBeInTheDocument();
   });
 
-  it("runs urgent actions on pointer activation but not keyboard activation", () => {
+  it("exposes disabled reasons on pointer and keyboard focus, then dismisses them", () => {
+    render(<DisabledControl reason="Vehicle state is stale"><button type="button" disabled>Hold</button></DisabledControl>);
+    const button = screen.getByRole("button", { name: "Hold" });
+    const wrapper = button.parentElement as HTMLElement;
+    const tooltip = screen.getByRole("tooltip", { name: "Vehicle state is stale" });
+
+    expect(button).toHaveAccessibleDescription("Vehicle state is stale");
+    expect(tooltip).not.toHaveClass("disabled-tooltip--visible");
+    fireEvent.pointerEnter(wrapper);
+    expect(tooltip).toHaveClass("disabled-tooltip--visible");
+    fireEvent.pointerLeave(wrapper);
+    expect(tooltip).not.toHaveClass("disabled-tooltip--visible");
+    fireEvent.focus(wrapper);
+    expect(tooltip).toHaveClass("disabled-tooltip--visible");
+    fireEvent.keyDown(wrapper, { key: "Escape" });
+    expect(tooltip).not.toHaveClass("disabled-tooltip--visible");
+  });
+
+  it("removes stale tooltip linkage when a control becomes enabled", () => {
+    const { rerender } = render(<DisabledControl reason="Blocked"><button type="button" disabled>Start</button></DisabledControl>);
+    expect(screen.getByRole("button", { name: "Start" })).toHaveAccessibleDescription("Blocked");
+
+    rerender(<DisabledControl><button type="button">Start</button></DisabledControl>);
+    expect(screen.getByRole("button", { name: "Start" })).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("runs urgent actions only after pointer down and up on the control", () => {
     const onAction = vi.fn();
     const onBlocked = vi.fn();
     render(<UrgentActionButton label="Hold" onAction={onAction} onBlocked={onBlocked} />);
@@ -85,7 +144,12 @@ describe("interaction primitives", () => {
     expect(onAction).not.toHaveBeenCalled();
     expect(onBlocked).toHaveBeenCalledTimes(1);
 
-    fireEvent.pointerUp(screen.getByRole("button", { name: "Hold" }));
+    const button = screen.getByRole("button", { name: "Hold" });
+    fireEvent.pointerUp(button);
+    expect(onAction).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(button);
+    fireEvent.pointerUp(button);
     expect(onAction).toHaveBeenCalledTimes(1);
   });
 

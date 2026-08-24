@@ -49,6 +49,29 @@ function combinedMap(): MapState {
     trajectory: { label: "trajectory", source_status: "available", points: [{ x: 0, y: -1 }, { x: 5, y: 3 }] },
     drone_trail: { label: "drone_trail", source_status: "available", points: [{ x: 3, y: 2 }, { x: 5, y: 3 }] },
     auto_fit_bounds: { min_x: -1, min_y: -2, max_x: 11, max_y: 4 },
+    top_down_stored_overview_conductors: [{ conductor_id: "stored-a", source: "stored_overview", source_status: "available", points: [{ x: 20, y: 40 }] }],
+    top_down_live_conductors: [{ conductor_id: "live-a", source: "live_perception", source_status: "available", points: [{ x: 21, y: 41 }] }],
+    top_down_drone_pose: { projection: "top_down", position: { x: 24, y: 43 }, altitude_m: 3 },
+    top_down_target_state: { target_id: "target-1", label: "Target", position: { x: 28, y: 42 }, status: "available" },
+    top_down_target_history: [{ x: 26, y: 42 }, { x: 28, y: 42 }],
+    top_down_trajectory: { label: "trajectory", source_status: "available", points: [{ x: 20, y: 39 }, { x: 24, y: 43 }] },
+    top_down_drone_trail: { label: "drone_trail", source_status: "available", points: [{ x: 23, y: 42 }, { x: 24, y: 43 }] },
+    top_down_auto_fit_bounds: { min_x: 19, min_y: 38, max_x: 31, max_y: 45 },
+    pylon_endpoints: [
+      { pylon_id: 1, label: "pylon 1", position: { x: 20, y: 40 }, source_status: "available" },
+      { pylon_id: 2, label: "pylon 2", position: { x: 30, y: 40 }, source_status: "available" },
+    ],
+    inferred_corridor: { label: "inferred corridor direction", source_status: "available", points: [{ x: 20, y: 40 }, { x: 30, y: 40 }] },
+    capture_preview: { target_id: "pylon-capture-preview", label: "pylon capture preview", position: { x: 24, y: 43 }, status: "available" },
+    transport: {
+      serialized_bytes: 4096,
+      geometry_point_count: 24,
+      publish_rate_limit_hz: 10,
+      estimated_max_kbps: 327.7,
+      live_source_age_ms: 120,
+      drone_pose_age_ms: 80,
+      stale_after_ms: 2000,
+    },
   };
 }
 
@@ -148,17 +171,18 @@ describe("MapPage", () => {
     expect(stored).toHaveAttribute("r", "6");
   });
 
-  it("hides unavailable map data and removes it from the legend", () => {
+  it("shows stale map data with stale styling instead of presenting frozen data as current", () => {
     render(<MapPage mapState={stoppedPerceptionMap()} />);
 
     expect(screen.getByTestId("map-layer-stored")).toBeInTheDocument();
-    expect(screen.queryByTestId("map-layer-live")).not.toBeInTheDocument();
+    expect(screen.getByTestId("map-layer-live")).toHaveClass("map-source--stale");
     expect(screen.queryByTestId("map-layer-trajectory")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("map-layer-drone-trail")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("map-marker-target")).not.toBeInTheDocument();
+    expect(screen.getByTestId("map-layer-drone-trail")).toHaveClass("map-source--stale");
+    expect(screen.getByTestId("map-marker-target")).toHaveClass("map-source--stale");
+    expect(screen.getByText(/STALE: live geometry/)).toBeInTheDocument();
     expect(screen.getByTestId("map-legend")).toHaveTextContent("stored");
-    expect(screen.getByTestId("map-legend")).not.toHaveTextContent("live");
-    expect(screen.getByTestId("map-legend")).not.toHaveTextContent("target");
+    expect(screen.getByTestId("map-legend")).toHaveTextContent("live");
+    expect(screen.getByTestId("map-legend")).toHaveTextContent("target");
   });
 
   it("supports layer toggles and hides labels to avoid clutter", () => {
@@ -177,6 +201,10 @@ describe("MapPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Top-down" }));
     expect(screen.getByRole("img", { name: "top_down map" })).toBeInTheDocument();
+    expect(screen.getByTestId("map-marker-pylon-1")).toBeInTheDocument();
+    expect(screen.getByTestId("map-marker-pylon-2")).toBeInTheDocument();
+    expect(screen.getByTestId("map-layer-corridor")).toBeInTheDocument();
+    expect(screen.getByTestId("map-marker-capture-preview")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Side-by-side" }));
     expect(screen.getByRole("img", { name: "powerline_orthogonal map" })).toBeInTheDocument();
@@ -200,12 +228,15 @@ describe("MapPage", () => {
     expect(screen.getByRole("img", { name: "powerline_orthogonal map" })).toBeInTheDocument();
   });
 
-  it("shows a disabled camera/video placeholder without active streaming controls", () => {
+  it("shows compact typed geometry transport age, size, rate, and link budget", () => {
     render(<MapPage mapState={combinedMap()} />);
 
-    expect(screen.getByLabelText("Camera and video scope")).toHaveTextContent(
-      "Deferred for v2: the runtime link does not expose a supported high-bandwidth stream.",
-    );
-    expect(screen.getByRole("button", { name: "Stream unavailable" })).toBeDisabled();
+    const diagnostics = screen.getByLabelText("Geometry transport diagnostics");
+    expect(diagnostics).toHaveTextContent("120 ms");
+    expect(diagnostics).toHaveTextContent("4.0 KiB");
+    expect(diagnostics).toHaveTextContent("24");
+    expect(diagnostics).toHaveTextContent("10.0 Hz");
+    expect(diagnostics).toHaveTextContent("327.7 kbps");
+    expect(screen.queryByText(/Camera\/Video/)).not.toBeInTheDocument();
   });
 });

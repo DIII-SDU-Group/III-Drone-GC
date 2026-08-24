@@ -2,6 +2,9 @@ export type StoredSession = {
   token: string;
   endpointId: string;
   runtimeName: string;
+  runtimeId?: string | null;
+  systemId?: string | null;
+  profile?: string | null;
 };
 
 const SESSION_KEY = "iii-gc-v2-session";

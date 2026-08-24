@@ -1,54 +1,189 @@
-# GUI v2 Real-Profile Acceptance Checklist
+# Field Inspection Real-Profile Acceptance Record
 
-Use this checklist for lab or field validation of GUI v2 with an onboard real
-profile runtime host and a separate ground-control computer.
+This is the signed acceptance record for operating the inspection mission on a
+real aircraft. The authoritative operator sequence is
+[`docs/field-inspection-operations.md`](../../../docs/field-inspection-operations.md).
+Create one copy of this record per aircraft, software revision, configuration,
+site, and staged test. Simulation evidence does not authorize field flight.
 
-Record the date, aircraft/system ID, operator network name, runtime host, GC
-host, git revisions, and artifact directory before starting. Store screenshots,
-curl output, proxy/runtime logs, and command response JSON with the test record.
+## Test Record
 
-## Required Evidence
+| Field | Recorded value |
+| --- | --- |
+| Acceptance stage | Bench / Propeller-off / Restrained or tethered / Open-area / Powerline-site |
+| Date and time (UTC) | |
+| Aircraft ID / serial | |
+| Runtime ID and system ID | |
+| Operator and safety pilot | |
+| Test lead / approver | |
+| Site and powerline owner authorization | |
+| Airframe, FCU, payload revisions | |
+| Workspace and III submodule revisions | |
+| PX4 revision and parameter export | |
+| Active configuration snapshot and hash | |
+| Mission specification identity and hash | |
+| Runtime API / frontend / proxy versions | |
+| Operator laptop and browser | |
+| Operator network / subnet / firewall evidence | |
+| Weather, wind, temperature, visibility | |
+| Artifact directory and rosbag IDs | |
+| Previous stage record | |
+
+## Entry Gates
 
 | Check | Procedure | Evidence to capture | Pass condition |
 | --- | --- | --- | --- |
-| Runtime API advertises real identity | From the GC computer, open the GC frontend discovery view and also call `curl http://<runtime-host>:8765/identity`. | Screenshot of discovery result; `/identity` JSON. | Runtime identity shows expected `runtime_id`, `runtime_name`, `system_id` where available, schema `v2alpha1`, and `profile: real`. |
-| GC computer discovers drone runtime API | Use mDNS discovery through the GC proxy: `curl http://<gc-host>:8780/runtime/discovery?timeout_s=3`. If multicast is blocked, add a manual endpoint in the frontend and with `/runtime/discovery/manual`. | Discovery JSON or manual endpoint JSON. | Runtime endpoint appears once, has the expected base URL, and can be validated by the proxy. |
-| Runtime target validation and selection | Select the discovered/manual runtime in the frontend. Also call `/runtime/targets/validate` and `/runtime/target/select` against the GC proxy. | Target validation/selection JSON and frontend selected-runtime screenshot. | GC proxy accepts only the validated runtime API endpoint and `GET /runtime/target` shows the selected runtime. |
-| GC computer has no ROS/DDS/MAVSDK dependency | On the GC computer, verify no ROS environment is required for the GUI stack. Suggested checks: `command -v ros2` may be absent; no DDS domain or ROS setup is sourced before starting compose. | Shell transcript showing frontend/proxy compose startup and discovery without ROS sourcing. | Frontend and proxy operate with only Docker/browser/network access to runtime API. |
-| Browser login creates the active GUI session | Log in through the frontend. Also call `GET /proxy/session` through the GC proxy with the bearer token. | Session JSON and frontend authenticated state. | Session is accepted, heartbeat interval/lease timeout match deployment configuration, and a second browser login is rejected while the first is active. |
-| Frontend remains available during runtime disconnection | With the frontend loaded, block or stop runtime API network access from the GC computer while leaving GC frontend/proxy running. | Screenshot before disconnect, disconnected/stale UI screenshot, proxy logs. | Static frontend remains reachable; runtime-dependent state becomes disconnected/stale and mutating controls are disabled. |
-| Reconnect restores state without queued commands | Restore runtime API network access and reselect/login if required. Watch dashboard/state domains recover. | Before/after screenshots; runtime event history; command-result log showing no queued command dispatch during outage. | Live state resumes only after runtime selection/authentication. No commands sent during disconnection are replayed. |
-| Runtime API status distinguishes API/daemon/socket/booted/active | Open Runtime page and call `GET /proxy/runtime/status`. Also call `GET /proxy/system/health`. | Runtime page screenshot plus JSON responses. | API up, daemon socket/ping state, booted, active, and degraded/error fields are separately visible. |
-| MAVSDK/MAVLink state is visible | With FCU Ethernet/MAVLink available, open Dashboard/Flight and call `GET /proxy/vehicle/status`. | Vehicle status JSON and Flight page screenshot. | Command transport shows available/connected with endpoint, heartbeat/update timestamps, armed/in-air/nav state, and any ROS/uXRCE disagreement/degraded reason. |
-| ROS/uXRCE disagreement fails closed | If practical in lab, interrupt ROS/uXRCE vehicle status while MAVLink remains connected, or vice versa. | Vehicle status JSON before/after interruption. | Runtime surfaces source availability/disagreement and dangerous command permissions fail closed when state is stale, unknown, or conflicting. |
-| Dangerous runtime mutations blocked while armed/in-flight/unknown | While vehicle is armed, in flight, or safety state is unknown/stale, try Runtime page boot/start/stop/restart/shutdown and service mutations. | UI disabled-state screenshot; command rejection JSON from `runtime.*` command attempt if tested through API. | Mutating runtime controls are disabled or rejected with a clear reason; no runtime mutation executes. |
-| Flight commands require valid real state | Try to arm/takeoff/land only inside the approved real-profile procedure. For negative testing, use unknown/stale state instead of actual flight if safer. | Flight page screenshot; `px4.*` command response/rejection JSON. | Commands are accepted only when runtime API validation says the real state is fresh and safe; otherwise they are rejected fail-closed. |
-| Payload/perception/configuration workflows are gated | In Mission mode or while a custom operation is active, inspect Payload, Perception, and Configuration pages. | UI screenshots; command rejection JSON for representative blocked actions. | Gripper, PL mapper, powerline overview, and configuration writes are disabled/rejected according to mode/owner state. |
-| Logs and rosbag access stay runtime-host-local | Use Logs and Rosbags pages through the GC proxy. Confirm no direct filesystem or ROS access from GC host. | Logs source JSON; rosbag status/list JSON; proxy request logs. | GC receives log/rosbag data only through runtime API/proxy endpoints. |
-| Manual endpoint fallback works without mDNS | Disable or block UDP 5353 multicast, then add the runtime URL manually in the frontend. | Firewall/network note; manual endpoint JSON; selected target screenshot. | Manual endpoint validates and selects the same runtime identity; broad network exposure is not added to recover discovery. |
-| Logout/release behavior | Logout from the frontend and call `GET /proxy/session` with the old token. | Logout response and rejected old-session response. | Session is released; old token no longer authorizes state/log/command endpoints. |
+| MAVSDK/MAVLink state is visible | Compare Flight and `/vehicle/status` with FCU link active. | Screenshot and JSON. | Transport, heartbeat, fused state, and disagreement are explicit. |
+| Reconnect restores state without queued commands | Interrupt and restore runtime networking without pressing a command. | Event history and before/after state. | A fresh snapshot restores state and no mutation is replayed. |
 
-## Artifact Checklist
+- [ ] Previous stage passed and its deviations are closed. Bench has no
+  previous-stage requirement.
+- [ ] Runtime identity reports `profile: real` and exactly matches the expected
+  runtime ID, aircraft/system ID, mission specification, and configuration.
+- [ ] GC computer discovers drone runtime API, or the documented manual endpoint
+  fallback validates the same pinned identity.
+- [ ] GC computer has no ROS/DDS/MAVSDK dependency; frontend and proxy start from
+  the packaged operator command.
+- [ ] Flight controller, RC, QGroundControl, geofence, battery, payload, latch,
+  gripper, and physical emergency procedures passed their normal preflight.
+- [ ] MAVSDK/MAVLink and ROS/uXRCE state agree and are fresh.
+- [ ] Runtime API status distinguishes API/daemon/socket/booted/active and all
+  required mission modes are registered with stable live PX4 IDs.
+- [ ] Inspection recording is active and available storage exceeds the mission
+  and reserve budget.
+- [ ] Operator and safety pilot reviewed the stop criteria and rollback steps.
 
-- GC proxy `GET /identity`, `/runtime/discovery`, `/runtime/target`.
-- Runtime API `/identity`, `/runtime/status`, `/system/health`,
-  `/vehicle/status`, `/control/status`, `/mission/status`, `/operations/status`.
-- Screenshot of Dashboard, Runtime, Flight, Payload, Perception,
-  Configuration, Logs, Rosbags, and Map pages after login.
-- Screenshot or JSON for each expected command rejection.
-- Runtime API logs and GC proxy logs for the test window.
-- Network evidence that runtime API TCP `8765`, GC proxy TCP `8780`, frontend
-  TCP `5173`, and mDNS UDP `5353` are limited to the operator network.
+## Stage Progression
+
+Do not skip stages. Mark `N/A` only when the test lead records a technical and
+safety justification.
+
+| Stage | Scope and pass condition | Result | Record / signature |
+| --- | --- | --- | --- |
+| Bench | Real-profile identity, auth, discovery/manual fallback, configuration, logs, rosbag export, mapper/payload state, disconnect/reconnect, and all command rejection tests pass with propulsion inhibited. | | |
+| Propeller-off | Arm/mode command path, RC takeover, Hold, mission activation rejection, gripper/latch signals, and runtime restart reconstruction pass without propellers. | | |
+| Restrained or tethered | If applicable, controlled thrust, Hold/Position takeover, link loss, mode-executor release, and landing/disarm behavior pass within the restraint envelope. | | |
+| Open-area | Manual preparation motions and mission activation from eligible/ineligible geometry pass away from conductors; recharge intent is observed but cable contact is not attempted unless the approved fixture permits it. | | |
+| Powerline-site | Complete workflow below passes at the authorized line with safety pilot control immediately available. | | |
+
+## Complete Inspection Workflow
+
+### Connect And Preflight
+
+- [ ] Operator confirms the prominent aircraft ID, runtime ID, and real profile
+  before login; a mismatched identity is rejected.
+- [ ] A second browser session is rejected while the operator lease is fresh.
+- [ ] Dashboard, Mission, Flight, Payload, Perception, Map, Configuration,
+  Rosbags, and Logs show fresh typed state or an explicit unavailable reason.
+- [ ] Dangerous runtime mutations blocked while armed/in-flight/unknown are
+  disabled in the UI and rejected by the runtime API.
+- [ ] Stop criteria remain visible from Mission and as persistent alerts.
+
+### Manual Overview Preparation
+
+- [ ] Safety pilot manually arms, takes off, and positions the aircraft at the
+  powerline overview pose. CustomOperation and pre-known simulation positions
+  are not used.
+- [ ] Operator starts PL mapper and visually approves fresh live vector geometry
+  in both the spatial and orthogonal projection-plane views.
+- [ ] Operator stores the powerline overview. The GUI shows its global/GNSS
+  persistence metadata, capture time, validity, and source.
+- [ ] Safety pilot manually flies to pylon endpoint 1; operator captures slot 1
+  and verifies the current aircraft position and timestamp.
+- [ ] Safety pilot manually flies to pylon endpoint 2; operator captures slot 2
+  and verifies both stored endpoint IDs and the derived span.
+- [ ] A repeated component capture replaces that component only; clear removes
+  both pylon endpoints after confirmation. Restore a valid two-pylon overview
+  before continuing.
+- [ ] Mapper/overview/pylon mutations are rejected while Mission owns control.
+
+### Activation Geometry
+
+- [ ] From each side, an armed airborne start outside the corridor and between
+  pylons shows side classification and nearest same-side ingress, then starts
+  the constant `inspection_demo` mode after press-and-hold.
+- [ ] Starts inside the corridor, longitudinally outside the pylon span, on a
+  cable, with stale pose, invalid GPS, stale perception, incomplete overview,
+  inactive recording, or changed/missing mode ID are rejected before motion.
+- [ ] Starting position may otherwise vary; no pre-known mission-start position
+  is required.
+
+### Inspection, Recharge, And Resume
+
+- [ ] Drone reaches the nearest inspection path on its current side, aligns yaw
+  to the powerline, and flies both fixed-altitude conductor-side legs with the
+  configured clearance and pylon-end margins.
+- [ ] Battery telemetry visibly depletes and automatic policy remains onboard.
+- [ ] `Recharge now` is phase-gated, visibly acknowledged, and transitions from
+  inspection through Reach Cable without unsafe command replay.
+- [ ] Cable alignment uses settled live perception; latch state is confirmed
+  before charger input raises battery state.
+- [ ] `Stay on cable` and `Leave cable now` are accepted only in cable-charging
+  mode and their lifecycle is visible.
+- [ ] Leave Cable returns safely and inspection resumes at the interruption
+  position, without returning to the prior waypoint.
+- [ ] A second recharge driven by the configured battery threshold completes the
+  same cycle without operator timing assumptions.
+
+### Interruption, Recovery, And Landing
+
+- [ ] RC/QGroundControl Hold or Position takeover is exercised during inspection
+  and one phase-specific maneuver. The executor releases control and never
+  reacquires it automatically.
+- [ ] GUI Global Hold requests PX4 Hold, reports safe action stopping, and shows
+  mission/custom-operation ownership reconciliation.
+- [ ] Browser close or lease expiry leaves onboard behavior unchanged, disables
+  mutations, and reconnect restores state without queued commands.
+- [ ] Frontend remains available during runtime disconnection; state becomes
+  stale. Runtime API restart reconstructs the current mission phase without
+  requesting control.
+- [ ] Charging/perception/transition failure appears as a persistent visual
+  alert with prescribed action and recent command/mode context.
+- [ ] Safety pilot lands and disarms through the approved manual path. Mission
+  landing/disarm is not interpreted as an unexpected takeover.
+- [ ] Recording stops automatically after executor control ends according to the
+  current recorder ownership contract. Logs and rosbag export are complete.
+
+## Required Artifacts
+
+- [ ] Runtime, aircraft, software, configuration, mission, and network identity.
+- [ ] Screenshots for every workflow section and every hard rejection.
+- [ ] `/identity`, `/runtime/status`, `/system/health`, `/vehicle/status`,
+  `/control/status`, `/mission/status`, `/operations/status`, `/payload/status`,
+  `/perception/status`, `/powerline/status`, `/map/state`, and event history.
+- [ ] Runtime API, proxy, supervision, mission, maneuver, perception, payload,
+  and PX4/QGroundControl logs for the full test window.
+- [ ] Inspection rosbag list, exported bag checksum, configuration/PX4 exports,
+  and operator-network/firewall evidence.
+- [ ] Deviation log with owner, disposition, and link to corrective evidence.
 
 ## Stop Criteria
 
-Stop the acceptance run and keep the system in its current safe state if any of
-these occur:
+Immediately stop mission progression and take RC/QGroundControl control for any
+unexpected motion, cable clearance loss, stale or conflicting flight state,
+PX4 failsafe, mode-ID change, mapper/perception loss, latch ambiguity, charging
+without confirmed latch, mission error, transition timeout, ownership conflict,
+recording/storage failure, identity mismatch, command replay, or loss of the
+approved operating boundary. Do not use the GUI to experiment through a hard
+gate.
 
-- GC proxy selects an endpoint whose `/identity` does not match the expected
-  runtime profile/system.
-- Frontend queues or replays a command after reconnect.
-- Any mutating command executes while the runtime API reports armed, in flight,
-  stale, unknown, or conflicting safety-critical state.
-- Runtime API exposes detailed state, logs, or command handlers without a valid
-  browser session.
+## Rollback And Safeing
+
+1. Safety pilot selects Hold or Position with RC/QGroundControl.
+2. Confirm the GUI and PX4 both show the external owner; if not, trust PX4/RC
+   and treat the GUI as diagnostic only.
+3. If airborne and the area is clear, land and disarm through the approved
+   manual path. If latched, first follow the cable/latch recovery procedure.
+4. Stop the managed aircraft system only after fresh disarmed-and-landed state;
+   leave `iii-runtime-api` online to retain evidence.
+5. Export logs, rosbag, configuration, PX4 parameters, and screenshots before
+   restart. Record the failed gate and do not advance stages until disposition.
+
+## Sign-Off
+
+| Role | Name | Signature | UTC date | Result / conditions |
+| --- | --- | --- | --- | --- |
+| Operator | | | | |
+| Safety pilot | | | | |
+| Test lead | | | | |
+| Powerline/site authority, where required | | | | |

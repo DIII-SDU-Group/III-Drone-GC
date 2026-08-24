@@ -32,6 +32,10 @@ class ProxyHttpResponse:
     content: bytes
 
 
+class ProxyUpstreamTimeout(RuntimeError):
+    """The selected runtime did not answer before the proxy deadline."""
+
+
 class ProxyHttpClient(Protocol):
     async def request(
         self,
@@ -56,8 +60,11 @@ class HttpxProxyHttpClient:
         headers: dict[str, str],
         content: bytes,
     ) -> ProxyHttpResponse:
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
-            response = await client.request(method, url, headers=headers, content=content)
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+                response = await client.request(method, url, headers=headers, content=content)
+        except httpx.TimeoutException as exc:
+            raise ProxyUpstreamTimeout(f"selected runtime timed out after {self.timeout_s:.1f}s") from exc
         return ProxyHttpResponse(
             status_code=response.status_code,
             headers=_filtered_headers(response.headers),

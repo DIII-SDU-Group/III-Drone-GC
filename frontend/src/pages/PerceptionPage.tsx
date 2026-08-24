@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { ToastRegion, type CommandResult, type ToastMessage } from "../components";
+import { DisabledControl, MapView, PressAndHoldButton, ToastRegion, type CommandResult, type ToastMessage } from "../components";
 import type { RuntimeCommandDispatcher } from "../api/commands";
 import type { CommandResponse } from "../generated/contracts";
 import type { RuntimeStoreState } from "../state";
@@ -11,6 +11,7 @@ const PL_MAPPER_COMMANDS = [
   { id: "perception.pl_mapper.freeze", label: "Freeze mapper" },
   { id: "perception.pl_mapper.stop", label: "Stop mapper" },
 ] as const;
+const APPROVAL_KEY = "iii-drone:inspection:perception-approved-at";
 
 export function PerceptionPage({
   state,
@@ -22,6 +23,8 @@ export function PerceptionPage({
   const [overviewTimeoutS, setOverviewTimeoutS] = useState(5);
   const [plMapperReset, setPlMapperReset] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [replacementSlot, setReplacementSlot] = useState<number | null>(null);
+  const [approvedAt, setApprovedAt] = useState<string | null>(() => localStorage.getItem(APPROVAL_KEY));
   const disabledReason = perceptionDisabledReason(state);
 
   async function run(commandId: string, parameters?: Record<string, unknown>) {
@@ -35,8 +38,22 @@ export function PerceptionPage({
     }
   }
 
+  function toggleApproval() {
+    if (approvedAt) {
+      localStorage.removeItem(APPROVAL_KEY);
+      setApprovedAt(null);
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    localStorage.setItem(APPROVAL_KEY, timestamp);
+    setApprovedAt(timestamp);
+  }
+
   const perception = state.domains.perception;
   const powerline = state.domains.powerline;
+  const pylonOverview = powerline?.pylon_overview;
+  const captureRejections = stringListFromLatest(powerline?.latest, "capture_rejections");
+  const captureReady = powerline?.latest?.capture_ready === true;
 
   return (
     <div className="workflow-page perception-page">
@@ -69,6 +86,58 @@ export function PerceptionPage({
       </section>
 
       <section className="workflow-section">
+        <div className="workflow-section__heading">
+          <h3>Pylon Endpoints</h3>
+          <span>{pylonOverview?.pylon_count ?? 0} / 2 captured</span>
+        </div>
+        <dl className="status-list">
+          <div><dt>Validity</dt><dd>{pylonOverview?.valid ? "complete" : "incomplete"}</dd></div>
+          <div><dt>Frame</dt><dd>{pylonOverview?.frame_id || "unknown"}</dd></div>
+          <div><dt>Source</dt><dd>{pylonOverview?.overview_source ?? "none"}</dd></div>
+          <div><dt>GNSS persistence</dt><dd>{pylonOverview?.persistence_file_present ? "stored" : "not stored"}</dd></div>
+          <div><dt>Freshness</dt><dd>{pylonOverview?.freshness ?? "unknown"}</dd></div>
+        </dl>
+        {pylonOverview?.degraded_reason ? <p className="control-reason">{pylonOverview.degraded_reason}</p> : null}
+        <div className="pylon-endpoint-list">
+          {[1, 2].map((slot) => {
+            const endpoint = pylonOverview?.pylons?.find((pylon) => pylon.id === slot);
+            const replacing = replacementSlot === slot;
+            return (
+              <article className="pylon-endpoint" key={slot}>
+                <div>
+                  <strong>Endpoint {slot}</strong>
+                  <p>{endpoint ? `x ${endpoint.x.toFixed(2)} m, y ${endpoint.y.toFixed(2)} m` : "Not captured"}</p>
+                </div>
+                {endpoint && !replacing ? (
+                  <DisabledControl reason={disabledReason}>
+                  <button type="button" disabled={Boolean(disabledReason)} onClick={() => setReplacementSlot(slot)}>
+                    Replace endpoint
+                  </button>
+                  </DisabledControl>
+                ) : (
+                  <PressAndHoldButton
+                    label={replacing ? "Confirm replace" : "Capture endpoint"}
+                    disabledReason={disabledReason}
+                    onConfirm={() => {
+                      void run("pylon.capture_current", { pylon_id: slot, replace_existing: replacing });
+                      setReplacementSlot(null);
+                    }}
+                  />
+                )}
+                {replacing ? <button type="button" onClick={() => setReplacementSlot(null)}>Cancel replace</button> : null}
+              </article>
+            );
+          })}
+        </div>
+        <p className="control-hint">Capture samples the current onboard aircraft position after the low-speed dwell; coordinates cannot be edited here.</p>
+        <PressAndHoldButton
+          label="Clear pylon overview"
+          disabledReason={disabledReason ?? ((pylonOverview?.pylon_count ?? 0) === 0 ? "No pylon endpoints are stored." : undefined)}
+          onConfirm={() => void run("pylon.overview.clear")}
+        />
+      </section>
+
+      <section className="workflow-section">
         <h3>Powerline Overview</h3>
         <dl className="status-list">
           <div>
@@ -98,7 +167,6 @@ export function PerceptionPage({
 
       <section className="workflow-section">
         <h3>PL Mapper Controls</h3>
-        {disabledReason ? <p className="control-reason">{disabledReason}</p> : null}
         <label className="check-field" htmlFor="pl-mapper-reset">
           <input
             id="pl-mapper-reset"
@@ -111,24 +179,13 @@ export function PerceptionPage({
         <div className="inline-actions">
           {PL_MAPPER_COMMANDS.map((command) => {
             const commandDisabledReason = disabledReason ?? plMapperCommandDisabledReason(perception?.pl_mapper_state, command.id);
-            return (
-              <button
-                type="button"
-                key={command.id}
-                disabled={Boolean(commandDisabledReason)}
-                title={commandDisabledReason}
-                onClick={() => void run(command.id, { reset: plMapperReset })}
-              >
-                {command.label}
-              </button>
-            );
+            return <DisabledControl key={command.id} reason={commandDisabledReason}><button type="button" disabled={Boolean(commandDisabledReason)} onClick={() => void run(command.id, { reset: plMapperReset })}>{command.label}</button></DisabledControl>;
           })}
         </div>
       </section>
 
       <section className="workflow-section">
         <h3>Update Powerline Overview</h3>
-        {disabledReason ? <p className="control-reason">{disabledReason}</p> : null}
         <div className="inline-actions">
           <label className="compact-field" htmlFor="overview-timeout">
             Timeout
@@ -142,14 +199,22 @@ export function PerceptionPage({
               onChange={(event) => setOverviewTimeoutS(clampOverviewTimeout(Number(event.target.value)))}
             />
           </label>
-          <button
-            type="button"
-            disabled={Boolean(disabledReason)}
-            onClick={() => void run("powerline.overview.update", { timeout_s: overviewTimeoutS })}
-          >
-            Update overview
-          </button>
+          <PressAndHoldButton
+            label="Store approved overview"
+            disabledReason={disabledReason ?? (!captureReady ? captureRejections.join("; ") || "Capture readiness is unknown." : undefined)}
+            onConfirm={() => void run("powerline.overview.update", { timeout_s: overviewTimeoutS })}
+          />
         </div>
+        {captureReady ? <p className="control-hint">Live geometry is ready for operator-approved storage.</p> : null}
+      </section>
+
+      <section className="workflow-section projection-section">
+        <div className="workflow-section__heading">
+          <h3>Orthogonal Projection</h3>
+          <button type="button" onClick={toggleApproval}>{approvedAt ? "Clear acknowledgment" : "Acknowledge perception"}</button>
+        </div>
+        {approvedAt ? <p className="control-hint">Perception review acknowledged {new Date(approvedAt).toLocaleString()}.</p> : null}
+        <MapView mapState={perceptionMapState(state)} projection="powerline_orthogonal" />
       </section>
 
       <section className="workflow-section source-drilldown">
@@ -160,6 +225,7 @@ export function PerceptionPage({
             ["Status", powerline?.live_perception_status ?? "unknown"],
             ["Line count", String(numberFromLatest(powerline?.latest, "live_powerline_line_count") ?? "unknown")],
             ["Source timestamp", powerline?.source_timestamp ?? "unknown"],
+            ["Source age", timestampAge(powerline?.source_timestamp)],
           ]}
         />
         <SourceBlock
@@ -183,6 +249,23 @@ export function PerceptionPage({
       <ToastRegion toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </div>
   );
+}
+
+function perceptionMapState(state: RuntimeStoreState): RuntimeStoreState["domains"]["map"] {
+  if (state.connection.connected) return state.domains.map;
+  if (state.domains.map) return { ...state.domains.map, freshness: "stale" };
+  return {
+    freshness: "stale",
+    frame: { status: "missing", projection: "powerline_orthogonal" },
+  };
+}
+
+function timestampAge(value?: string | null): string {
+  if (!value) return "unknown";
+  const timestamp = new Date(value).valueOf();
+  if (!Number.isFinite(timestamp)) return "unknown";
+  const ageMs = Math.max(0, Date.now() - timestamp);
+  return ageMs < 1000 ? `${Math.round(ageMs)} ms` : `${(ageMs / 1000).toFixed(1)} s`;
 }
 
 function SourceBlock({ title, rows }: { title: string; rows: Array<[string, string]> }) {
@@ -279,6 +362,11 @@ function permissionAllowedText(permission?: { allowed?: boolean }): string {
 function numberFromLatest(latest: Record<string, unknown> | undefined, key: string): number | null {
   const value = latest?.[key];
   return typeof value === "number" ? value : null;
+}
+
+function stringListFromLatest(latest: Record<string, unknown> | undefined, key: string): string[] {
+  const value = latest?.[key];
+  return Array.isArray(value) ? value.map(String) : [];
 }
 
 function clampOverviewTimeout(value: number): number {

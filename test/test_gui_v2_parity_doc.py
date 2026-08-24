@@ -44,4 +44,5 @@ def test_gui_v2_parity_doc_covers_required_legacy_surfaces():
     missing = [surface for surface in REQUIRED_LEGACY_SURFACES if surface not in text]
     assert missing == []
     assert "No current Tk GUI diagnostic or command is silently dropped" in text
-    assert "Deferred camera/video item" in text
+    assert "Intentionally absent" in text
+    assert "gui-v2-real-profile-acceptance.md" in text

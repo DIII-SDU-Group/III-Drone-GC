@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState } from "react";
 
 export const PRESS_AND_HOLD_DURATION_MS = 1500;
 
@@ -27,6 +27,47 @@ export function DisabledReason({ reason }: DisabledReasonProps) {
     return null;
   }
   return <p className="control-reason">{reason}</p>;
+}
+
+type DisabledControlProps = {
+  reason?: string;
+  children: React.ReactElement<{ "aria-describedby"?: string }>;
+  className?: string;
+};
+
+export function DisabledControl({ reason, children, className }: DisabledControlProps) {
+  if (!reason || !isValidElement(children)) {
+    return children;
+  }
+  return <DisabledControlWithReason key={reason} reason={reason} className={className}>{children}</DisabledControlWithReason>;
+}
+
+function DisabledControlWithReason({ reason, children, className }: Required<Pick<DisabledControlProps, "reason" | "children">> & Pick<DisabledControlProps, "className">) {
+  const [open, setOpen] = useState(false);
+  const tooltipId = useId();
+
+  const describedBy = [children.props["aria-describedby"], tooltipId].filter(Boolean).join(" ");
+  return (
+    <span
+      className={["disabled-control", className].filter(Boolean).join(" ")}
+      tabIndex={0}
+      onBlur={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+          event.currentTarget.blur();
+        }
+      }}
+      onPointerEnter={() => setOpen(true)}
+      onPointerLeave={() => setOpen(false)}
+    >
+      {cloneElement(children, { "aria-describedby": describedBy })}
+      <span className={open ? "disabled-tooltip disabled-tooltip--visible" : "disabled-tooltip"} id={tooltipId} role="tooltip">
+        {reason}
+      </span>
+    </span>
+  );
 }
 
 type CriticalKeyboardBlockProps = {
@@ -62,6 +103,7 @@ export function PressAndHoldButton({
 }: PressAndHoldButtonProps) {
   const [progress, setProgress] = useState(0);
   const [hintVisible, setHintVisible] = useState(false);
+  const [commandSent, setCommandSent] = useState(false);
   const startTimeRef = useRef<number | null>(null);
   const completeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -87,9 +129,13 @@ export function PressAndHoldButton({
     }
     clearTimers();
     completedRef.current = false;
-    setProgress(0);
-    setHintVisible(false);
+    // A disabled transition is external acknowledgement that the command changed state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCommandSent(false);
   }, [disabledReason]);
+
+  const visibleProgress = disabledReason ? 0 : progress;
+  const visibleHint = disabledReason ? false : hintVisible;
 
   function beginHold() {
     if (disabledReason) {
@@ -97,6 +143,7 @@ export function PressAndHoldButton({
     }
     clearTimers();
     completedRef.current = false;
+    setCommandSent(false);
     startTimeRef.current = Date.now();
     setHintVisible(false);
     setProgress(0);
@@ -105,11 +152,12 @@ export function PressAndHoldButton({
         return;
       }
       const elapsed = Date.now() - startTimeRef.current;
-      setProgress(Math.min(100, Math.round((elapsed / holdDurationMs) * 100)));
+      setProgress(Math.min(99, Math.floor((elapsed / holdDurationMs) * 100)));
     }, 50);
     completeTimeoutRef.current = setTimeout(() => {
       completedRef.current = true;
       setProgress(100);
+      setCommandSent(true);
       clearTimers();
       onConfirm();
     }, holdDurationMs);
@@ -119,6 +167,7 @@ export function PressAndHoldButton({
     if (startTimeRef.current === null) {
       if (completedRef.current) {
         completedRef.current = false;
+        setCommandSent(false);
         setProgress(0);
       }
       return;
@@ -126,38 +175,43 @@ export function PressAndHoldButton({
     const completed = completedRef.current;
     clearTimers();
     completedRef.current = false;
+    setCommandSent(false);
     setProgress(0);
     setHintVisible(!completed);
   }
 
   return (
     <div className="control-stack">
-      <button
-        type="button"
-        className={["critical-button", className].filter(Boolean).join(" ")}
-        aria-disabled={Boolean(disabledReason)}
-        disabled={Boolean(disabledReason)}
-        onPointerDown={beginHold}
-        onPointerUp={cancelHold}
-        onPointerCancel={cancelHold}
-        onPointerLeave={cancelHold}
-        onClick={(event) => event.preventDefault()}
-        onKeyDown={(event) => blockCriticalKeyboardActivation(event, () => setHintVisible(true))}
-      >
-        {label}
-      </button>
+      <DisabledControl reason={disabledReason} className="disabled-control--fill">
+        <button
+          type="button"
+          className={["critical-button", commandSent ? "critical-button--sent" : undefined, className].filter(Boolean).join(" ")}
+          aria-label={label}
+          aria-disabled={Boolean(disabledReason)}
+          aria-live="polite"
+          disabled={Boolean(disabledReason)}
+          onPointerDown={beginHold}
+          onPointerUp={cancelHold}
+          onPointerCancel={cancelHold}
+          onPointerLeave={cancelHold}
+          onClick={(event) => event.preventDefault()}
+          onKeyDown={(event) => blockCriticalKeyboardActivation(event, () => setHintVisible(true))}
+        >
+          {commandSent ? `${label} - command sent` : label}
+        </button>
+      </DisabledControl>
       <div
         aria-label={`${label} hold progress`}
         aria-valuemax={100}
         aria-valuemin={0}
-        aria-valuenow={progress}
-        className="hold-progress"
+        aria-valuenow={visibleProgress}
+        aria-valuetext={commandSent ? "Command sent" : visibleProgress === 0 ? "Not started" : `Holding ${visibleProgress}%`}
+        className={commandSent ? "hold-progress hold-progress--sent" : "hold-progress"}
         role="progressbar"
       >
-        <span style={{ width: `${progress}%` }} />
+        <span style={{ width: `${visibleProgress}%` }} />
       </div>
-      {hintVisible ? <p className="control-hint">Press and hold for 1.5 seconds.</p> : null}
-      <DisabledReason reason={disabledReason} />
+      {visibleHint ? <p className="control-hint">Press and hold for 1.5 seconds.</p> : null}
     </div>
   );
 }
@@ -176,25 +230,40 @@ export function UrgentActionButton({
   onBlocked,
   className,
 }: UrgentActionButtonProps) {
+  const pointerArmedRef = useRef(false);
+
+  function cancelPointerActivation() {
+    pointerArmedRef.current = false;
+  }
+
   return (
     <div className="control-stack">
-      <button
-        type="button"
-        className={["urgent-button", className].filter(Boolean).join(" ")}
-        aria-disabled={Boolean(disabledReason)}
-        disabled={Boolean(disabledReason)}
-        onClick={(event) => event.preventDefault()}
-        onKeyDown={(event) => blockCriticalKeyboardActivation(event, onBlocked)}
-        onPointerUp={() => {
-          if (!disabledReason) {
-            onAction();
-          }
-        }}
-      >
-        {label}
-      </button>
+      <DisabledControl reason={disabledReason} className="disabled-control--fill">
+        <button
+          type="button"
+          className={["urgent-button", className].filter(Boolean).join(" ")}
+          aria-disabled={Boolean(disabledReason)}
+          disabled={Boolean(disabledReason)}
+          onClick={(event) => event.preventDefault()}
+          onKeyDown={(event) => blockCriticalKeyboardActivation(event, onBlocked)}
+          onPointerDown={(event) => {
+            pointerArmedRef.current = !disabledReason && event.button === 0;
+          }}
+          onPointerUp={() => {
+            const shouldActivate = pointerArmedRef.current;
+            cancelPointerActivation();
+            if (shouldActivate) {
+              onAction();
+            }
+          }}
+          onPointerCancel={cancelPointerActivation}
+          onPointerLeave={cancelPointerActivation}
+          onBlur={cancelPointerActivation}
+        >
+          {label}
+        </button>
+      </DisabledControl>
       <div className="hold-progress hold-progress--placeholder" aria-hidden="true" />
-      <DisabledReason reason={disabledReason} />
     </div>
   );
 }
@@ -228,6 +297,8 @@ type CriticalWarningBannerProps = {
   acknowledged?: boolean;
   resolved?: boolean;
   onAcknowledge?: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
 };
 
 export function CriticalWarningBanner({
@@ -236,6 +307,8 @@ export function CriticalWarningBanner({
   acknowledged = false,
   resolved = false,
   onAcknowledge,
+  actionLabel,
+  onAction,
 }: CriticalWarningBannerProps) {
   if (resolved || acknowledged) {
     return null;
@@ -246,11 +319,14 @@ export function CriticalWarningBanner({
         <strong>{title}</strong>
         <p>{message}</p>
       </div>
-      {onAcknowledge ? (
-        <button type="button" onClick={onAcknowledge}>
-          Acknowledge
-        </button>
-      ) : null}
+      <div className="critical-warning__actions">
+        {actionLabel && onAction ? (
+          <button type="button" onClick={onAction}>{actionLabel}</button>
+        ) : null}
+        {onAcknowledge ? (
+          <button type="button" onClick={onAcknowledge}>Acknowledge</button>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -290,11 +366,12 @@ export function ToastRegion({ toasts, onDismiss }: ToastRegionProps) {
   }, [toasts]);
 
   useEffect(() => {
+    const timers = timersRef.current;
     return () => {
-      for (const timer of timersRef.current.values()) {
+      for (const timer of timers.values()) {
         clearTimeout(timer);
       }
-      timersRef.current.clear();
+      timers.clear();
     };
   }, []);
 
@@ -337,6 +414,7 @@ export function NumericField({
     <div className="field-stack">
       <label htmlFor={id}>{label}</label>
       <div className="unit-field">
+        <DisabledControl reason={disabledReason} className="disabled-control--fill">
         <input
           id={id}
           type="number"
@@ -346,14 +424,15 @@ export function NumericField({
           step={step}
           aria-describedby={`${id}-constraints`}
           aria-disabled={Boolean(disabledReason)}
+          disabled={Boolean(disabledReason)}
           onChange={(event) => onChange(Number(event.target.value))}
         />
+        </DisabledControl>
         <span>{unit}</span>
       </div>
       <p id={`${id}-constraints`} className="field-constraints">
         {min} to {max} {unit}
       </p>
-      <DisabledReason reason={disabledReason} />
     </div>
   );
 }

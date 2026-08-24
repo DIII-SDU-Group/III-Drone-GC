@@ -1,11 +1,13 @@
 import { useState } from "react";
 
 import {
+  DisabledControl,
   PressAndHoldButton,
   type CommandResult,
   ToastRegion,
   type ToastMessage,
 } from "../components";
+import { formatBytes } from "../format/bytes";
 import type { RuntimeCommandDispatcher } from "../api/commands";
 import type { CommandResponse } from "../generated/contracts";
 import type { RuntimeStoreState } from "../state";
@@ -31,9 +33,9 @@ export function RosbagsPage({
 }) {
   const rosbag = state.domains.rosbag;
   const [recordingId, setRecordingId] = useState("");
-  const [outputDir, setOutputDir] = useState("");
   const [allTopics, setAllTopics] = useState(true);
-  const [topics, setTopics] = useState("");
+  const [topics, setTopics] = useState<string[]>([]);
+  const [topicQuery, setTopicQuery] = useState("");
   const [includeHiddenTopics, setIncludeHiddenTopics] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const disabledReason = state.connection.commands_disabled_reason ?? undefined;
@@ -43,6 +45,10 @@ export function RosbagsPage({
   const startNeedsHold = missionActive;
   const stopNeedsHold = missionActive || ownerSensitiveStop;
   const recordings = recordingRows(state);
+  const storageRoot = rosbag?.storage_root?.replace(/\/+$/, "") ?? "";
+  const startDisabledReason = disabledReason ?? (!storageRoot ? "Configured rosbag storage root is unavailable." : undefined);
+  const availableTopics = rosbag?.available_topics ?? [];
+  const visibleTopics = availableTopics.filter((topic) => topic.toLowerCase().includes(topicQuery.trim().toLowerCase()));
 
   async function run(commandId: string, parameters?: Record<string, unknown>, successMessage?: string) {
     try {
@@ -60,9 +66,8 @@ export function RosbagsPage({
   function startParameters(holdConfirmed: boolean) {
     return {
       recording_id: recordingId.trim(),
-      output_dir: outputDir.trim(),
       all_topics: allTopics,
-      topics: splitTopics(topics),
+      topics,
       include_hidden_topics: includeHiddenTopics,
       ...(holdConfirmed ? { hold_confirmed: true } : {}),
     };
@@ -122,26 +127,51 @@ export function RosbagsPage({
             <dt>Size</dt>
             <dd>{formatBytes(rosbag?.size_bytes)}</dd>
           </div>
+          <div>
+            <dt>Duration</dt>
+            <dd>{formatDuration(rosbag?.duration_seconds)}</dd>
+          </div>
+          <div>
+            <dt>Free space</dt>
+            <dd>{formatBytes(rosbag?.free_space_bytes)}</dd>
+          </div>
         </dl>
+        {rosbag?.recording_error ? <p className="control-reason" role="alert">{rosbag.recording_error}</p> : null}
         <p className="control-hint">Source: {rosbag?.source_label ?? "unknown"} / {rosbag?.freshness ?? "unknown"}</p>
       </section>
 
       <section className="workflow-section">
         <h3>Manual Recording</h3>
-        {missionActive ? <p className="control-reason">Rosbag recording control during Mission mode requires press-and-hold confirmation.</p> : null}
         <div className="rosbag-form">
-          <label htmlFor="rosbag-id">
-            Recording ID
-            <input id="rosbag-id" value={recordingId} onChange={(event) => setRecordingId(event.target.value)} />
+          <label className="rosbag-name-field" htmlFor="rosbag-id">
+            Recording path
+            <span className="rosbag-name-composer">
+              <code>{storageRoot || "unavailable"}/</code>
+              <input id="rosbag-id" aria-label="Recording ID prefix" placeholder="recording" value={recordingId} onChange={(event) => setRecordingId(sanitizeRecordingPrefix(event.target.value))} />
+              <code>_YYYYMMDD_HHMMSS</code>
+            </span>
           </label>
-          <label htmlFor="rosbag-output">
-            Output directory
-            <input id="rosbag-output" value={outputDir} onChange={(event) => setOutputDir(event.target.value)} />
-          </label>
-          <label htmlFor="rosbag-topics">
-            Topics
-            <input id="rosbag-topics" value={topics} disabled={allTopics} onChange={(event) => setTopics(event.target.value)} />
-          </label>
+          <div className="rosbag-topic-field">
+            <label htmlFor="rosbag-topic-search">Search topics</label>
+            <input
+              id="rosbag-topic-search"
+              type="search"
+              disabled={allTopics}
+              placeholder="Filter topics"
+              value={topicQuery}
+              onChange={(event) => setTopicQuery(event.target.value)}
+            />
+            <label htmlFor="rosbag-topics">Topics</label>
+            <select
+              id="rosbag-topics"
+              multiple
+              disabled={allTopics}
+              value={topics}
+              onChange={(event) => setTopics(Array.from(event.currentTarget.selectedOptions, (option) => option.value))}
+            >
+              {visibleTopics.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+            </select>
+          </div>
           <label className="check-field" htmlFor="rosbag-all-topics">
             <input id="rosbag-all-topics" type="checkbox" checked={allTopics} onChange={(event) => setAllTopics(event.target.checked)} />
             All topics
@@ -159,21 +189,22 @@ export function RosbagsPage({
         {startNeedsHold ? (
           <PressAndHoldButton
             label="Start recording"
-            disabledReason={disabledReason}
+            disabledReason={startDisabledReason}
             onConfirm={() => void run("rosbag.start", startParameters(true), "Rosbag recording started")}
           />
         ) : (
           <div className="inline-actions">
-            <button type="button" disabled={Boolean(disabledReason)} onClick={() => void run("rosbag.start", startParameters(false), "Rosbag recording started")}>
+            <DisabledControl reason={startDisabledReason}>
+            <button type="button" disabled={Boolean(startDisabledReason)} onClick={() => void run("rosbag.start", startParameters(false), "Rosbag recording started")}>
               Start recording
             </button>
+            </DisabledControl>
           </div>
         )}
       </section>
 
       <section className="workflow-section">
         <h3>Stop Recording</h3>
-        {ownerSensitiveStop ? <p className="control-reason">Stopping {owner}-owned rosbag recording requires press-and-hold confirmation.</p> : null}
         {stopNeedsHold ? (
           <PressAndHoldButton
             label="Stop recording"
@@ -182,6 +213,7 @@ export function RosbagsPage({
           />
         ) : (
           <div className="inline-actions">
+            <DisabledControl reason={disabledReason ?? (!rosbag?.recording ? "No rosbag recording is active." : undefined)}>
             <button
               type="button"
               disabled={Boolean(disabledReason) || !rosbag?.recording}
@@ -189,6 +221,7 @@ export function RosbagsPage({
             >
               Stop recording
             </button>
+            </DisabledControl>
           </div>
         )}
       </section>
@@ -196,9 +229,9 @@ export function RosbagsPage({
       <section className="workflow-section">
         <div className="workflow-section__heading">
           <h3>Recordings</h3>
-          <button type="button" disabled={Boolean(disabledReason)} onClick={() => void run("rosbag.list", undefined, "Rosbag recordings refreshed")}>
+          <DisabledControl reason={disabledReason}><button type="button" disabled={Boolean(disabledReason)} onClick={() => void run("rosbag.list", undefined, "Rosbag recordings refreshed")}>
             Refresh list
-          </button>
+          </button></DisabledControl>
         </div>
         <div className="recording-list">
           {recordings.map((recording) => (
@@ -209,13 +242,13 @@ export function RosbagsPage({
               </div>
               <span>{formatBytes(recording.size_bytes)}</span>
               <span>{recording.owner ?? "unknown"}</span>
-              <button
+              <DisabledControl reason={disabledReason ?? (!recording.recording_id ? "Recording ID is unavailable." : undefined)}><button
                 type="button"
                 disabled={Boolean(disabledReason) || !recording.recording_id}
                 onClick={() => recording.recording_id ? void download(recording.recording_id) : undefined}
               >
                 Download
-              </button>
+              </button></DisabledControl>
             </article>
           ))}
         </div>
@@ -239,21 +272,14 @@ function ownerFromStatus(status: unknown): string | null {
   return typeof owner === "string" && owner ? owner : null;
 }
 
-function splitTopics(value: string): string[] {
-  return value.split(",").map((topic) => topic.trim()).filter(Boolean);
+function formatDuration(seconds?: number | null): string {
+  if (seconds === undefined || seconds === null) return "unknown";
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 }
 
-function formatBytes(value: number | null | undefined): string {
-  if (value == null) {
-    return "unknown";
-  }
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KiB`;
-  }
-  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+function sanitizeRecordingPrefix(value: string): string {
+  return Array.from(value, (character) => /[A-Za-z0-9_-]/.test(character) ? character : "_").join("");
 }
 
 function commandResponseToResult(response: CommandResponse, successMessage?: string): CommandResult {

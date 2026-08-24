@@ -21,3 +21,9 @@ def test_real_profile_acceptance_doc_lists_required_evidence():
     assert missing == []
     assert "| Check | Procedure | Evidence to capture | Pass condition |" in text
     assert "Stop Criteria" in text
+    for stage in ("Bench", "Propeller-off", "Restrained or tethered", "Open-area", "Powerline-site"):
+        assert stage in text
+    for record_field in ("Aircraft ID", "configuration snapshot", "Operator and safety pilot", "Weather", "Artifact directory"):
+        assert record_field in text
+    assert "Rollback And Safeing" in text
+    assert "Sign-Off" in text

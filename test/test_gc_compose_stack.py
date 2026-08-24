@@ -18,7 +18,8 @@ def test_gc_compose_stacks_define_frontend_and_proxy_services():
         assert "III_GC_PROXY_PUBLIC_URL" in compose
 
     assert "src/III-Drone-GC/frontend/Dockerfile" in prod
-    assert "${III_GC_FRONTEND_PORT:-5173}:80" in prod
+    assert "127.0.0.1:${III_GC_FRONTEND_PORT:-5173}:80" in prod
+    assert "III_GC_PROXY_HOST: 127.0.0.1" in prod
     assert "npm run dev" in dev
     assert "${III_GC_FRONTEND_PORT:-5173}:5173" in dev
 

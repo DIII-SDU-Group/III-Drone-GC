@@ -62,26 +62,33 @@ export function MapPage({ mapState }: { mapState?: MapState | null }) {
       <section className={viewMode === "side_by_side" ? "map-layout map-layout--split" : "map-layout"}>
         {viewMode === "side_by_side" ? (
           <>
-            <MapView mapState={mapState} projection="powerline_orthogonal" layers={layers} />
-            <MapView mapState={mapState} projection="top_down" layers={layers} />
+            <MapView mapState={mapState} projection="powerline_orthogonal" layers={layers} autoFit={autoFit} />
+            <MapView mapState={mapState} projection="top_down" layers={layers} autoFit={autoFit} />
           </>
         ) : (
-          <MapView mapState={mapState} projection={viewMode} layers={layers} />
+          <MapView mapState={mapState} projection={viewMode} layers={layers} autoFit={autoFit} />
         )}
       </section>
 
-      <section className="workflow-section camera-scope-panel" aria-label="Camera and video scope">
-        <div>
-          <h3>Camera/Video</h3>
-          <p>Deferred for v2: the runtime link does not expose a supported high-bandwidth stream.</p>
-        </div>
-        <button type="button" disabled>
-          Stream unavailable
-        </button>
+      <section className="workflow-section" aria-label="Geometry transport diagnostics">
+        <div className="workflow-section__heading"><h3>Geometry Transport</h3><span>{mapState?.freshness ?? "unknown"}</span></div>
+        <dl className="status-list">
+          <div><dt>Live age</dt><dd>{formatMilliseconds(mapState?.transport?.live_source_age_ms)}</dd></div>
+          <div><dt>Pose age</dt><dd>{formatMilliseconds(mapState?.transport?.drone_pose_age_ms)}</dd></div>
+          <div><dt>Payload</dt><dd>{formatBytes(mapState?.transport?.serialized_bytes)}</dd></div>
+          <div><dt>Geometry points</dt><dd>{mapState?.transport?.geometry_point_count ?? "unknown"}</dd></div>
+          <div><dt>Rate limit</dt><dd>{formatRate(mapState?.transport?.publish_rate_limit_hz)}</dd></div>
+          <div><dt>Maximum link load</dt><dd>{formatKbps(mapState?.transport?.estimated_max_kbps)}</dd></div>
+        </dl>
       </section>
     </div>
   );
 }
+
+function formatMilliseconds(value?: number | null): string { return typeof value === "number" ? (value < 1000 ? `${Math.round(value)} ms` : `${(value / 1000).toFixed(1)} s`) : "unknown"; }
+function formatBytes(value?: number | null): string { return typeof value === "number" ? (value < 1024 ? `${value} B` : `${(value / 1024).toFixed(1)} KiB`) : "unknown"; }
+function formatRate(value?: number | null): string { return typeof value === "number" ? `${value.toFixed(1)} Hz` : "unknown"; }
+function formatKbps(value?: number | null): string { return typeof value === "number" ? `${value.toFixed(1)} kbps` : "unknown"; }
 
 function LayerToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: () => void }) {
   return (

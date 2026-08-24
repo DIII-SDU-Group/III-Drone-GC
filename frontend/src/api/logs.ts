@@ -22,7 +22,7 @@ export type RuntimeLogsClient = {
   listSources(): Promise<LogSourceSummary[]>;
   tail(sourceId: string, lines: number): Promise<LogLine[]>;
   download(sourceId: string): Promise<string>;
-  follow(sourceId: string, onLine: (line: LogLine) => void, onError: (message: string) => void): LogFollowHandle;
+  follow(sourceId: string, onLine: (line: LogLine) => void, onError: (message: string) => void, onState?: (connected: boolean) => void): LogFollowHandle;
 };
 
 export function createRuntimeLogsClient(
@@ -52,13 +52,15 @@ export function createRuntimeLogsClient(
       );
       return payload.content;
     },
-    follow: (sourceId, onLine, onError) => {
+    follow: (sourceId, onLine, onError, onState) => {
       const token = tokenProvider();
       if (!token) {
         onError("Log follow requires an authenticated runtime session.");
+        onState?.(false);
         return { close: () => undefined };
       }
       const socket = createWebSocket(buildProxyWebSocketUrl(baseUrl, `logs/follow/${encodeURIComponent(sourceId)}`, token));
+      socket.onopen = () => onState?.(true);
       socket.onmessage = (event) => {
         try {
           onLine(JSON.parse(String(event.data)) as LogLine);
@@ -66,7 +68,11 @@ export function createRuntimeLogsClient(
           onError("Received malformed log line from runtime API.");
         }
       };
-      socket.onerror = () => onError("Log follow WebSocket failed.");
+      socket.onerror = () => {
+        onState?.(false);
+        onError("Log follow WebSocket failed.");
+      };
+      socket.onclose = () => onState?.(false);
       return { close: () => socket.close() };
     },
   };

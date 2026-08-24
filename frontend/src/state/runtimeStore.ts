@@ -179,6 +179,7 @@ function applySnapshot(state: RuntimeStoreState, snapshot: OperatorStateSnapshot
     generated_at: snapshot.generated_at ?? null,
     domains: pickDomains(snapshot),
     events: mergeEvents(state.events, snapshotEvents),
+    command_results: mergeCommandResults(state.command_results, snapshot.command_results ?? []),
     connection: {
       connected: true,
       stale: false,
@@ -187,6 +188,19 @@ function applySnapshot(state: RuntimeStoreState, snapshot: OperatorStateSnapshot
       commands_disabled_reason: null,
     },
   };
+}
+
+function mergeCommandResults(
+  current: CommandResultMessage[],
+  incoming: CommandResultMessage[],
+): CommandResultMessage[] {
+  const byRequestId = new Map(current.map((result) => [result.request_id, result]));
+  for (const result of incoming) {
+    byRequestId.set(result.request_id, result);
+  }
+  return [...byRequestId.values()]
+    .sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)))
+    .slice(-100);
 }
 
 function applyPatch(state: RuntimeStoreState, patch: OperatorStatePatch): RuntimeStoreState {

@@ -21,11 +21,11 @@ import type { WebSocketMessage } from "../generated/contracts";
 const HEARTBEAT_INTERVAL_MS = 2000;
 const WEBSOCKET_RECONNECT_DELAY_MS = 1000;
 const CLIENT_LABEL = "iii-gc-v2-browser";
-const noopAuthenticated = (_authenticated: boolean) => undefined;
-const noopSessionToken = (_token: string | null) => undefined;
-const noopRuntimeMessage = (_message: WebSocketMessage) => undefined;
+const noopAuthenticated = () => undefined;
+const noopSessionToken = () => undefined;
+const noopRuntimeMessage = () => undefined;
 const noopRuntimeConnected = () => undefined;
-const noopRuntimeDisconnected = (_reason: string) => undefined;
+const noopRuntimeDisconnected = () => undefined;
 const defaultCreateWebSocket = (url: string) => new WebSocket(url);
 
 type ConnectionStatus = "prelogin" | "restoring" | "selected" | "authenticated" | "disconnected";
@@ -61,6 +61,7 @@ export function SessionGate({
   const [session, setSession] = useState<StoredSession | null>(() => loadStoredSession());
   const [sessionMetadata, setSessionMetadata] = useState<SessionResponse | null>(null);
   const [password, setPassword] = useState("");
+  const [identityConfirmed, setIdentityConfirmed] = useState(false);
   const [status, setStatus] = useState<ConnectionStatus>(session ? "restoring" : "prelogin");
   const [error, setError] = useState<string | null>(null);
   const websocketRef = useRef<WebSocket | null>(null);
@@ -110,6 +111,9 @@ export function SessionGate({
         setSelectedRuntime({
           endpoint_id: session.endpointId,
           runtime_name: session.runtimeName,
+          runtime_id: session.runtimeId,
+          system_id: session.systemId,
+          profile: session.profile,
           source: "remembered",
           base_url: "",
           address: "",
@@ -161,6 +165,7 @@ export function SessionGate({
 
   async function selectRuntime(endpointId: string) {
     setError(null);
+    setIdentityConfirmed(false);
     try {
       const state = await proxyClient.selectTarget(endpointId);
       setSelectedRuntime(state.selected);
@@ -176,6 +181,7 @@ export function SessionGate({
   function selectRuntimeFromDropdown(endpointId: string) {
     if (!endpointId) {
       setSelectedRuntime(null);
+      setIdentityConfirmed(false);
       setStatus("prelogin");
       return;
     }
@@ -188,6 +194,10 @@ export function SessionGate({
       setError("Select a runtime before login.");
       return;
     }
+    if (!identityConfirmed) {
+      setError("Confirm the aircraft identity before login.");
+      return;
+    }
     setError(null);
     try {
       const loginResponse = await proxyClient.login(password, CLIENT_LABEL);
@@ -195,6 +205,9 @@ export function SessionGate({
         token: loginResponse.session_token,
         endpointId: selectedRuntime.endpoint_id,
         runtimeName: selectedRuntime.runtime_name,
+        runtimeId: selectedRuntime.runtime_id,
+        systemId: selectedRuntime.system_id,
+        profile: selectedRuntime.profile,
       };
       saveStoredSession(stored);
       saveLastEndpoint(selectedRuntime.endpoint_id);
@@ -235,6 +248,14 @@ export function SessionGate({
         <div>
           <span className="connection-strip__label">Runtime</span>
           <strong>{session.runtimeName}</strong>
+        </div>
+        <div>
+          <span className="connection-strip__label">Aircraft</span>
+          <strong>{session.systemId ?? "identity unavailable"}</strong>
+        </div>
+        <div>
+          <span className="connection-strip__label">Profile</span>
+          <strong>{session.profile ?? "unspecified"}</strong>
         </div>
         <div>
           <span className="connection-strip__label">Session</span>
@@ -281,6 +302,8 @@ export function SessionGate({
             {runtimes.map((runtime) => (
               <option key={runtime.endpoint_id} value={runtime.endpoint_id}>
                 {runtime.runtime_name} - {runtime.address}:{runtime.port}
+                {runtime.system_id ? ` - ${runtime.system_id}` : ""}
+                {runtime.profile ? ` [${runtime.profile}]` : ""}
                 {runtime.reachable === false ? " (unreachable)" : ""}
               </option>
             ))}
@@ -288,6 +311,22 @@ export function SessionGate({
         </label>
 
         <form className="login-form" onSubmit={login}>
+          <fieldset className="identity-confirmation" disabled={!selectedRuntime}>
+            <legend>Aircraft identity</legend>
+            <dl>
+              <div><dt>Aircraft</dt><dd>{selectedRuntime?.system_id ?? "Unavailable"}</dd></div>
+              <div><dt>Runtime ID</dt><dd>{selectedRuntime?.runtime_id ?? "Unavailable"}</dd></div>
+              <div><dt>Profile</dt><dd>{selectedRuntime?.profile ?? "Unspecified"}</dd></div>
+            </dl>
+            <label>
+              <input
+                type="checkbox"
+                checked={identityConfirmed}
+                onChange={(event) => setIdentityConfirmed(event.target.checked)}
+              />
+              I confirm this is the intended aircraft and profile
+            </label>
+          </fieldset>
           <label htmlFor="runtime-password">Operator password</label>
           <div>
             <input
@@ -295,17 +334,19 @@ export function SessionGate({
               type="password"
               autoComplete="current-password"
               value={password}
-              disabled={!selectedRuntime || status === "authenticated"}
+              disabled={!selectedRuntime || !identityConfirmed || status === "authenticated"}
               onChange={(event) => setPassword(event.target.value)}
             />
-            <button type="submit" disabled={!selectedRuntime || status === "authenticated"}>
+            <button type="submit" disabled={!selectedRuntime || !identityConfirmed || status === "authenticated"}>
               Login
             </button>
           </div>
         </form>
 
         <p className="selected-runtime">
-          {selectedRuntime ? `Selected runtime: ${selectedRuntime.runtime_name}` : "Select a runtime before login."}
+          {selectedRuntime
+            ? `Selected runtime: ${selectedRuntime.runtime_name} / ${selectedRuntime.system_id ?? "unknown aircraft"} / ${selectedRuntime.profile ?? "unknown profile"}`
+            : "Select a runtime before login."}
         </p>
       </div>
     </section>

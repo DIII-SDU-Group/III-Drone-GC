@@ -4,10 +4,17 @@ Chosen model for the first deployment: trusted isolated operator network,
 runtime API browser password, and runtime API CLI token. TLS is deferred and the
 runtime API/GC proxy ports are not public interfaces.
 
+Deferred-TLS risk owner: **III-Drone technical lead**. Decision accepted for
+the first isolated-network field trial on **2026-08-12**. This acceptance
+expires if the deployment leaves the isolated operator network; HTTPS/WSS and
+certificate identity then become mandatory before operation.
+
 ## Required Checks
 
 - Real profile sets `III_RUNTIME_API_REQUIRE_SECRETS=1`.
 - Real profile replaces `dev-password` and `dev-cli-token`.
+- The runtime environment file is readable only by the runtime service account
+  (`chmod 600`) and is not committed or copied into artifacts.
 - Runtime API TCP `8765` is reachable only from the operator network or the
   ground-control computer.
 - GC proxy TCP `8780` and frontend TCP `5173` are reachable only from operator
@@ -23,6 +30,28 @@ runtime API/GC proxy ports are not public interfaces.
 - Runtime static frontend assets are served from the ground-control computer,
   not from the drone/runtime host.
 - The deployment risk log accepts the deferred TLS risks before field use.
+
+## Enforced Network Configuration
+
+On the onboard runtime host, preview and then apply the persistent nftables
+scope using the actual private operator-network CIDR:
+
+```bash
+./scripts/network/configure_runtime_api_firewall.sh --operator-subnet 192.168.42.0/24
+sudo ./scripts/network/configure_runtime_api_firewall.sh --operator-subnet 192.168.42.0/24 --apply
+sudo nft list table inet iii_operator
+```
+
+The dedicated table accepts runtime API TCP `8765` and mDNS UDP `5353` only
+from that CIDR, then drops those ports from every other IPv4/IPv6 source. Its
+rule file is persisted under `/etc/nftables.d/`. Production GC Compose binds
+both proxy and frontend to `127.0.0.1`, so they are reachable only by the local
+operator browser. Do not substitute `0.0.0.0/0`; the script accepts only private
+IPv4 networks of `/8` or narrower.
+
+Record `nft list table inet iii_operator`, listening sockets, runtime
+`/identity`, proxy target validation, and a rejected connection from outside
+the operator subnet in the field acceptance evidence.
 
 ## Automated Verification
 

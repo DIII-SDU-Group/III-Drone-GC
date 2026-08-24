@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from iii_drone_gc.v2_proxy.app import GCProxySettings, create_app
+import pytest
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +61,44 @@ def test_gc_proxy_allows_configured_frontend_origin():
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_real_gc_profile_requires_pinned_identity_and_explicit_cors(monkeypatch):
+    monkeypatch.setenv("III_GC_EXPECTED_PROFILE", "real")
+    monkeypatch.delenv("III_GC_EXPECTED_RUNTIME_ID", raising=False)
+    monkeypatch.delenv("III_GC_EXPECTED_SYSTEM_ID", raising=False)
+
+    with pytest.raises(RuntimeError, match="III_GC_EXPECTED_RUNTIME_ID"):
+        GCProxySettings.from_env()
+
+    monkeypatch.setenv("III_GC_EXPECTED_RUNTIME_ID", "aircraft-7-runtime")
+    monkeypatch.setenv("III_GC_EXPECTED_SYSTEM_ID", "aircraft-7")
+    monkeypatch.setenv("III_GC_PROXY_CORS_ORIGINS", "*")
+
+    with pytest.raises(RuntimeError, match="explicit III_GC_PROXY_CORS_ORIGINS"):
+        GCProxySettings.from_env()
+
+
+def test_real_gc_profile_accepts_pinned_identity_and_explicit_cors(monkeypatch):
+    monkeypatch.setenv("III_GC_EXPECTED_PROFILE", "real")
+    monkeypatch.setenv("III_GC_EXPECTED_RUNTIME_ID", "aircraft-7-runtime")
+    monkeypatch.setenv("III_GC_EXPECTED_SYSTEM_ID", "aircraft-7")
+    monkeypatch.setenv("III_GC_PROXY_CORS_ORIGINS", "http://127.0.0.1:5173")
+
+    settings = GCProxySettings.from_env()
+
+    assert settings.expected_profile == "real"
+    assert settings.expected_runtime_id == "aircraft-7-runtime"
+    assert settings.expected_system_id == "aircraft-7"
+
+
+def test_runtime_request_timeout_is_configurable_and_positive(monkeypatch):
+    monkeypatch.setenv("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "45")
+    assert GCProxySettings.from_env().runtime_request_timeout_s == 45.0
+
+    monkeypatch.setenv("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "0")
+    with pytest.raises(RuntimeError, match="greater than zero"):
+        GCProxySettings.from_env()
 
 
 def test_v2_proxy_sources_have_no_runtime_or_ros_dependencies():

@@ -37,13 +37,28 @@ commands into runtime API domains/pages instead.
 - `docs/gui-v2-deployment.md`: sim/dev and real-profile deployment topology,
   environment variables, and exposed ports.
 - `docs/gui-v2-sim-e2e-smoke.md`: repeatable sim end-to-end smoke scenario and
-  artifact expectations.
-- `docs/gui-v2-real-profile-acceptance.md`: lab/field acceptance checklist for
-  the two-host real-profile deployment.
+  complete inspection/recharge/resume acceptance cycle.
+- `docs/gui-v2-real-profile-acceptance.md`: staged signed real-aircraft
+  inspection acceptance record.
 - `docs/gui-v2-security-checklist.md`: trusted-operator-network security
   checklist and deferred TLS work.
 - `docs/gui-v2-risk-register.md`: completion gate for GUI v2 open risks,
   owner tasks, evidence, and final acceptance checks.
+
+### Operator Startup
+
+After provisioning `~/.config/iii-ground-control.env` from
+`config/ground-control.env.example`, start the field operator stack with one
+command from any working directory:
+
+```bash
+/path/to/III-Drone-ros2-ws/scripts/workspace/iii_ground_control.sh start
+```
+
+The same command supports `status`, `logs`, `restart`/`recover`, and `stop`.
+Stop and recovery capture Compose logs under `runtime_logs/ground-control/`.
+The onboard `iii-runtime-api.service` is independently supervised and remains
+reachable when managed aircraft nodes are stopped from the Runtime page.
 
 ## Data Flow
 
@@ -79,3 +94,11 @@ python3 -m pytest src/III-Drone-GC/test -q
 - keep GUI v2 backend/frontend code ROS-free and contract-driven
 - when adding a new operator-visible v2 status or command, add the contract,
   runtime handler/proxy/frontend coverage, and focused tests
+
+## Global Hold
+
+The persistent **Hold** control dispatches `px4.hold`. It confirms PX4 Hold and
+then reports action stopping and autonomous-owner termination through runtime
+control state. It ends the current mission run; the GUI intentionally provides
+no generic Resume, Abort, or Mission Land control. A later inspection start is
+a new press-and-hold activation subject to current readiness checks.

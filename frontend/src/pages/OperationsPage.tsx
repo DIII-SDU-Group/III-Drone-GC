@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import {
+  DisabledControl,
   NumericField,
   PressAndHoldButton,
   ToastRegion,
@@ -115,7 +116,6 @@ export function OperationsPage({
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [readiness, setReadiness] = useState<Record<string, string>>({});
   const customOperationModeActive = isCustomOperationModeActive(state);
-  const activeOperation = isOperationActive(state);
 
   async function runCommand(commandId: string, parameters: Record<string, unknown>) {
     try {
@@ -169,11 +169,10 @@ export function OperationsPage({
             <dd>{latestOperationFeedback(state)}</dd>
           </div>
         </dl>
-        {!customOperationModeActive ? <p className="control-reason">CustomOperation mode is not active.</p> : null}
         <UrgentActionButton
           label="Cancel operation"
           onAction={() => void runCommand("custom_operation.cancel", {})}
-          disabledReason={activeOperation ? undefined : "No custom operation is active."}
+          disabledReason={operationCancelDisabledReason(state)}
         />
       </section>
 
@@ -202,12 +201,9 @@ export function OperationsPage({
                   }
                 />
               ))}
-              {disabledReason ? <p className="control-reason">{disabledReason}</p> : null}
               {readiness[def.operation] ? <p className="selected-runtime">Readiness: {readiness[def.operation]}</p> : null}
               <div className="operation-actions">
-                <button type="button" disabled={Boolean(disabledReason)} onClick={() => void validate(def)}>
-                  Validate
-                </button>
+                <DisabledControl reason={disabledReason}><button type="button" disabled={Boolean(disabledReason)} onClick={() => void validate(def)}>Validate</button></DisabledControl>
                 <PressAndHoldButton
                   label="Start operation"
                   onConfirm={() =>
@@ -262,11 +258,11 @@ function OperationField({
     return (
       <div className="field-stack">
         <label htmlFor={id}>{field.label}</label>
-        <select id={id} value={String(value)} disabled={Boolean(disabledReason)} onChange={(event) => onChange(event.target.value)}>
+        <DisabledControl reason={disabledReason} className="disabled-control--fill"><select id={id} value={String(value)} disabled={Boolean(disabledReason)} onChange={(event) => onChange(event.target.value)}>
           <option value="map">map</option>
           <option value="powerline">powerline</option>
           <option value="target">target</option>
-        </select>
+        </select></DisabledControl>
       </div>
     );
   }
@@ -351,6 +347,20 @@ function isCustomOperationModeActive(state: RuntimeStoreState): boolean {
 function isOperationActive(state: RuntimeStoreState): boolean {
   const operation = state.domains.operation;
   return Boolean(operation?.active_operation_id || operation?.latest?.operation_active === true);
+}
+
+export function operationCancelDisabledReason(state: RuntimeStoreState): string | undefined {
+  if (state.connection.commands_disabled_reason) {
+    return state.connection.commands_disabled_reason;
+  }
+  const runtimeReasons = state.domains.control?.latest?.command_permissions;
+  if (runtimeReasons && typeof runtimeReasons === "object") {
+    const reasons = (runtimeReasons as Record<string, unknown>)["custom_operation.cancel"];
+    if (Array.isArray(reasons) && reasons.length > 0) {
+      return reasons.map(String).join("; ");
+    }
+  }
+  return isOperationActive(state) ? undefined : "No custom operation is active.";
 }
 
 function latestOperationFeedback(state: RuntimeStoreState): string {

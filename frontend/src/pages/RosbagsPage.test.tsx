@@ -14,6 +14,8 @@ function state(overrides: Partial<RuntimeStoreState> = {}): RuntimeStoreState {
         recording: true,
         recording_id: "manual-1",
         output_dir: "/bags/manual-1",
+        storage_root: "/bags",
+        available_topics: ["/tf", "/diagnostics"],
         owner: "manual",
         size_bytes: 2048,
         freshness: "fresh",
@@ -82,23 +84,27 @@ describe("RosbagsPage", () => {
     expect(screen.getAllByText("no").length).toBeGreaterThan(0);
   });
 
-  it("starts and stops manual recordings without mission-mode confirmation", () => {
+  it("starts and stops manual recordings without a client-controlled output path", async () => {
     const dispatchCommand = vi.fn().mockResolvedValue(accepted());
     render(<RosbagsPage state={state()} dispatchCommand={dispatchCommand} />);
 
-    fireEvent.change(screen.getByLabelText("Recording ID"), { target: { value: "operator-bag" } });
-    fireEvent.change(screen.getByLabelText("Output directory"), { target: { value: "/bags/operator-bag" } });
+    fireEvent.change(screen.getByLabelText("Recording ID prefix"), { target: { value: "operator bag" } });
+    expect(screen.getByLabelText("Recording ID prefix")).toHaveValue("operator_bag");
     fireEvent.click(screen.getByLabelText("All topics"));
-    fireEvent.change(screen.getByLabelText("Topics"), { target: { value: "/tf, /diagnostics" } });
+    expect(screen.getByLabelText("Search topics")).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Search topics"), { target: { value: "diag" } });
+    const topicSelect = screen.getByLabelText("Topics") as HTMLSelectElement;
+    Array.from(topicSelect.options).forEach((option) => { option.selected = true; });
+    fireEvent.change(topicSelect);
     fireEvent.click(screen.getByLabelText("Hidden topics"));
     fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+    await screen.findByRole("status");
     fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
 
     expect(dispatchCommand).toHaveBeenCalledWith("rosbag.start", {
-      recording_id: "operator-bag",
-      output_dir: "/bags/operator-bag",
+      recording_id: "operator_bag",
       all_topics: false,
-      topics: ["/tf", "/diagnostics"],
+      topics: ["/diagnostics"],
       include_hidden_topics: true,
     });
     expect(dispatchCommand).toHaveBeenCalledWith("rosbag.stop", { recording_id: "manual-1", timeout_sec: 5.0 });
@@ -114,18 +120,17 @@ describe("RosbagsPage", () => {
       />,
     );
 
-    expect(screen.getByText("Rosbag recording control during Mission mode requires press-and-hold confirmation.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start recording" })).toBeEnabled();
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Start recording" }));
     act(() => vi.advanceTimersByTime(1500));
+    expect(dispatchCommand).toHaveBeenCalledWith("rosbag.start", expect.objectContaining({ hold_confirmed: true }));
     fireEvent.pointerUp(screen.getByRole("button", { name: "Start recording" }));
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Stop recording" }));
     act(() => vi.advanceTimersByTime(1500));
-    fireEvent.pointerUp(screen.getByRole("button", { name: "Stop recording" }));
-
-    expect(dispatchCommand).toHaveBeenCalledWith("rosbag.start", expect.objectContaining({ hold_confirmed: true }));
     expect(dispatchCommand).toHaveBeenCalledWith("rosbag.stop", expect.objectContaining({ hold_confirmed: true }));
+    fireEvent.pointerUp(screen.getByRole("button", { name: "Stop recording" }));
   });
 
   it("requires press-and-hold with ownership warning when stopping mission-owned recording", () => {
@@ -147,17 +152,16 @@ describe("RosbagsPage", () => {
       />,
     );
 
-    expect(screen.getByText("Stopping mission-owned rosbag recording requires press-and-hold confirmation.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop recording" })).toBeEnabled();
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Stop recording" }));
     act(() => vi.advanceTimersByTime(1500));
-    fireEvent.pointerUp(screen.getByRole("button", { name: "Stop recording" }));
-
     expect(dispatchCommand).toHaveBeenCalledWith("rosbag.stop", {
       recording_id: "mission-bag",
       timeout_sec: 5.0,
       hold_confirmed: true,
     });
+    fireEvent.pointerUp(screen.getByRole("button", { name: "Stop recording" }));
   });
 
   it("refreshes list through runtime command and streams downloads through the proxy callback", async () => {

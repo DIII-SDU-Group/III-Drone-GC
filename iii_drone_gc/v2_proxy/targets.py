@@ -45,10 +45,16 @@ class RuntimeTargetManager:
         discovery: RuntimeDiscoveryService,
         identity_client: RuntimeIdentityClient | None = None,
         required_schema_revision: str = API_VERSION,
+        expected_runtime_id: str | None = None,
+        expected_system_id: str | None = None,
+        expected_profile: str | None = None,
     ):
         self.discovery = discovery
         self.identity_client = identity_client or HttpRuntimeIdentityClient()
         self.required_schema_revision = required_schema_revision
+        self.expected_runtime_id = expected_runtime_id
+        self.expected_system_id = expected_system_id
+        self.expected_profile = expected_profile
         self._lock = RLock()
         self._validated: dict[str, RuntimeEndpointSummary] = {}
         self._selected: RuntimeEndpointSummary | None = None
@@ -68,17 +74,47 @@ class RuntimeTargetManager:
             raise ValueError(
                 f"incompatible runtime API schema: expected {self.required_schema_revision}, got {schema_revision}"
             )
+        self._require_matching_identity(endpoint, identity)
         validated = endpoint.model_copy(
             update={
                 "runtime_name": identity.runtime_name or endpoint.runtime_name,
                 "api_version": identity.compatibility.schema_revision,
                 "profile": identity.profile or endpoint.profile,
+                "runtime_id": identity.runtime_id,
+                "system_id": identity.host_label,
                 "reachable": True,
             }
         )
         with self._lock:
             self._validated[endpoint_id] = validated
         return validated
+
+    def _require_matching_identity(self, endpoint: RuntimeEndpointSummary, identity: ApiIdentity) -> None:
+        mismatches: list[str] = []
+        if endpoint.runtime_id and endpoint.runtime_id != identity.runtime_id:
+            mismatches.append(
+                f"advertised runtime_id {endpoint.runtime_id!r} != live runtime_id {identity.runtime_id!r}"
+            )
+        if endpoint.system_id and endpoint.system_id != identity.host_label:
+            mismatches.append(
+                f"advertised system_id {endpoint.system_id!r} != live system_id {identity.host_label!r}"
+            )
+        if endpoint.profile and endpoint.profile != identity.profile:
+            mismatches.append(
+                f"advertised profile {endpoint.profile!r} != live profile {identity.profile!r}"
+            )
+        if self.expected_runtime_id and identity.runtime_id != self.expected_runtime_id:
+            mismatches.append(
+                f"expected runtime_id {self.expected_runtime_id!r}, got {identity.runtime_id!r}"
+            )
+        if self.expected_system_id and identity.host_label != self.expected_system_id:
+            mismatches.append(
+                f"expected system_id {self.expected_system_id!r}, got {identity.host_label!r}"
+            )
+        if self.expected_profile and identity.profile != self.expected_profile:
+            mismatches.append(f"expected profile {self.expected_profile!r}, got {identity.profile!r}")
+        if mismatches:
+            raise ValueError("runtime target identity mismatch: " + "; ".join(mismatches))
 
     def select(self, endpoint_id: str) -> RuntimeTargetState:
         with self._lock:

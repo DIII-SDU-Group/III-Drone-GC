@@ -168,7 +168,9 @@ describe("OperationsPage", () => {
 
     expect(screen.getByText("op-1")).toBeInTheDocument();
     expect(screen.getByText(/feedback/)).toBeInTheDocument();
-    fireEvent.pointerUp(screen.getByRole("button", { name: "Cancel operation" }));
+    const cancelButton = screen.getByRole("button", { name: "Cancel operation" });
+    fireEvent.pointerDown(cancelButton);
+    fireEvent.pointerUp(cancelButton);
 
     expect(dispatchCommand).toHaveBeenCalledWith("custom_operation.cancel", {});
   });

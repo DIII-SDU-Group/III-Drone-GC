@@ -29,6 +29,8 @@ class RuntimeEndpointSummary(ContractModel):
     port: int
     api_version: str | None = None
     profile: str | None = None
+    runtime_id: str | None = None
+    system_id: str | None = None
     reachable: bool | None = None
     last_seen_at: datetime = Field(default_factory=_utc_now)
 
@@ -178,6 +180,8 @@ def _endpoint_from_service_info(*, name: str, info: Any) -> RuntimeEndpointSumma
         port=port,
         api_version=properties.get("api_version"),
         profile=properties.get("profile"),
+        runtime_id=properties.get("runtime_id"),
+        system_id=properties.get("system_id"),
         reachable=True,
     )
 

@@ -32,11 +32,18 @@ def _endpoint(endpoint_id="runtime-1", base_url="http://10.0.0.2:8765", name="Di
     )
 
 
-def _identity(name="Runtime Identity", schema_revision="v2alpha1", profile="sim"):
+def _identity(
+    name="Runtime Identity",
+    schema_revision="v2alpha1",
+    profile="sim",
+    runtime_id="runtime-id",
+    system_id="aircraft-1",
+):
     return ApiIdentity(
-        runtime_id="runtime-id",
+        runtime_id=runtime_id,
         runtime_name=name,
         profile=profile,
+        host_label=system_id,
         compatibility=ApiCompatibility(schema_revision=schema_revision),
     )
 
@@ -66,6 +73,8 @@ def test_endpoint_validation_probes_identity_and_selected_target_state():
     assert validated.status_code == 200
     assert validated.json()["runtime_name"] == "Runtime Identity"
     assert validated.json()["api_version"] == "v2alpha1"
+    assert validated.json()["runtime_id"] == "runtime-id"
+    assert validated.json()["system_id"] == "aircraft-1"
     assert selected.status_code == 200
     assert selected.json()["selected"]["endpoint_id"] == endpoint.endpoint_id
     assert state.json()["selected"]["endpoint_id"] == endpoint.endpoint_id
@@ -147,3 +156,49 @@ def test_target_manager_rejects_unreachable_identity_probe_directly():
 
     with pytest.raises(RuntimeError):
         manager.validate_endpoint(endpoint.endpoint_id)
+
+
+def test_mdns_advertisement_must_match_live_identity():
+    endpoint = _endpoint().model_copy(
+        update={"runtime_id": "advertised-runtime", "system_id": "advertised-aircraft", "profile": "real"}
+    )
+    discovery = RuntimeDiscoveryService(provider=StaticDiscoveryProvider([endpoint]))
+    manager = RuntimeTargetManager(
+        discovery=discovery,
+        identity_client=_FakeIdentityClient(
+            {endpoint.base_url: _identity(runtime_id="different-runtime", system_id="different-aircraft", profile="sim")}
+        ),
+    )
+
+    with pytest.raises(ValueError, match="runtime target identity mismatch") as exc_info:
+        manager.validate_endpoint(endpoint.endpoint_id)
+
+    assert "advertised runtime_id" in str(exc_info.value)
+    assert "advertised system_id" in str(exc_info.value)
+    assert "advertised profile" in str(exc_info.value)
+
+
+def test_expected_aircraft_and_profile_are_fail_closed_for_manual_endpoint():
+    endpoint = RuntimeEndpointSummary(
+        endpoint_id="manual:http://10.0.0.2:8765",
+        source="manual",
+        runtime_name="Manual",
+        base_url="http://10.0.0.2:8765",
+        address="10.0.0.2",
+        port=8765,
+    )
+    discovery = RuntimeDiscoveryService(provider=StaticDiscoveryProvider([]))
+    discovery._manual_endpoints[endpoint.endpoint_id] = endpoint
+    manager = RuntimeTargetManager(
+        discovery=discovery,
+        identity_client=_FakeIdentityClient({endpoint.base_url: _identity(profile="sim")}),
+        expected_runtime_id="field-runtime",
+        expected_system_id="field-aircraft",
+        expected_profile="real",
+    )
+
+    with pytest.raises(ValueError, match="expected runtime_id") as exc_info:
+        manager.validate_endpoint(endpoint.endpoint_id)
+
+    assert "expected system_id" in str(exc_info.value)
+    assert "expected profile" in str(exc_info.value)

@@ -1,6 +1,6 @@
 # III Drone Ground Control GUI v2 Spec
 
-Status: Draft, living document.
+Status: Implemented baseline; field acceptance remains stage-gated.
 
 This document captures the agreed design for the GUI v2 rewrite and the open
 questions that must be resolved before implementation. Update it as decisions
@@ -505,10 +505,30 @@ Current Tkinter GUI functionality to preserve:
 - Gripper status and gripper open/close commands.
 - PL mapper commands.
 - Powerline overview update.
-- Live image/visualization paths currently exposed by the GUI.
+- Typed live/stored vector geometry in spatial and orthogonal projection views.
 - Parameter viewing/editing/loading/saving through the configuration server.
 
 ## 7. Additional Functional Scope
+
+### 7.1 Authoritative Field Inspection Workflow
+
+The detailed and authoritative procedure is
+[`docs/field-inspection-operations.md`](../../../docs/field-inspection-operations.md).
+In real operation the safety pilot manually flies to the overview position and
+both pylons. The GUI starts PL mapper, presents fresh spatial and orthogonal
+vector geometry for visual approval, stores one powerline overview, and captures
+two current-position pylon endpoints. No CustomOperation, Gazebo truth, or
+pre-known staging position is part of the real workflow.
+
+Inspection may start only while armed and airborne, outside the stored corridor
+and longitudinally between stored pylons. Onboard logic classifies the side and
+computes a direct nearest same-side ingress. The GUI presents this result but is
+not its authority. The mission specification is a development-time constant;
+the normal GUI exposes only one fixed **Start Inspection** action.
+
+Automated staging and fixture coordinates belong only to the simulation E2E
+runner. They must never be described as a field operating procedure or consumed
+by mission planning.
 
 Candidate additions for GUI v2:
 
@@ -558,8 +578,9 @@ Candidate additions for GUI v2:
   - Simulation controls are available only in simulation profile.
   - Simulation controls may include PX4/Gazebo backend start/stop/status where
     supported by runtime tooling.
-  - Real profile should hide or disable simulation-only controls with explicit
-    profile reason.
+  - Simulation backend controls are disabled in real profile with an explicit
+    profile reason. Engineering flight/runtime/operation pages remain visible
+    in both profiles and retain server-side safety gates.
 - Logs page:
   - Stream/select daemon logs.
   - Stream/select `iii-runtime-api` logs.
@@ -943,9 +964,9 @@ The desired dependency surface:
   or package so `iii-runtime-api` does not depend on the full core package for a
   helper math library.
 
-## 10. Open Design Questions
+## 10. Resolved Design Record
 
-Resolve these through the design interview:
+The implementation and authoritative field workflow resolve these questions:
 
 1. What is the primary operator workflow and first-screen layout?
 2. Which commands are allowed in simulation only, real only, or both?
@@ -957,7 +978,8 @@ Resolve these through the design interview:
 6. How should the frontend represent stale, missing, or degraded telemetry?
 7. What exact parameter-editing workflow should replace the current GUI?
 8. How much of simulation observation belongs in GUI v2 versus MCP/tools?
-9. What video/image streams are required, and at what fidelity/latency?
+9. No image/video feed is required. Typed vector geometry is provided at the
+   bounded operator update rate with explicit payload and staleness diagnostics.
 10. What historical logging, event replay, or audit trail is required?
 11. What should be included in the first implementation milestone? Resolved:
     the full spec is the target scope for this sweep, not a deliberately
@@ -1249,7 +1271,7 @@ complexity.
 
 ## 12. Information Architecture
 
-After authentication, the first screen is the diagnostic Operations Dashboard.
+After authentication, the first screen is the Mission workflow.
 There is no landing page.
 
 Target device class for v2 is computer/laptop displays only. Tablet/mobile
@@ -1285,11 +1307,11 @@ The dashboard should immediately present:
 - active mission, maneuver, or custom operation.
 - perception/powerline readiness.
 - payload, charger, and gripper status.
-- primary visualization/map/camera area.
+- primary typed map/geometry area.
 - event log and recent command results.
 
-Deeper pages should be available for detailed subsystem control and inspection,
-but the dashboard remains the operational entry point.
+Deeper pages should be available for detailed subsystem control and inspection.
+Mission is the operational entry point; Dashboard remains diagnostic.
 
 The dashboard is primarily diagnostic. It should summarize state, readiness,
 active operation/mission context, and major warnings. Flight/runtime/config
@@ -1311,11 +1333,11 @@ Dedicated pages:
 - `Rosbags`: recorder controls and recordings.
 - `Logs`: all logs and source-specific logs.
 - `Map`: full map/perception visualization.
+- `Mission`: manual-preparation status, fixed inspection activation, recharge
+  intents, stop criteria, and recovery state.
 
-No dedicated Mission page is required in v2. Mission activation belongs on the
-Flight page, and mission status appears on the dashboard/Flight diagnostics.
-A Mission page can be added later if mission-specific progress/control
-workflows expand beyond activation/status.
+Mission activation is available on Mission and remains visible on Flight for
+engineering/commissioning. Mission is the normal field workflow surface.
 
 A compressed global status bar is visible at the bottom of every page. It shows
 the most important overall diagnostics in compact form, such as runtime/API
@@ -1440,8 +1462,7 @@ The initial visualization is 2D-first, with multiple projections:
   screen space.
 - Detected powerline conductors should be visible in both relevant views.
 - The visualization must handle flight outside the immediate powerline corridor.
-- Pylon visualization is a future extension; the current system does not yet
-  represent pylons as first-class runtime geometry.
+- Stored pylon endpoints and the derived span are first-class runtime geometry.
 - Visualization source of truth is runtime ROS state only, in both simulation
   and real profiles.
 - Do not use simulation ground-truth geometry as an operator-map source in v2.
@@ -1479,15 +1500,14 @@ The initial visualization is 2D-first, with multiple projections:
 - The map may show a short recent drone trail for context.
 - GUI v2 does not require durable replay storage or a database.
 
-Camera/video streaming should be considered in the architecture, but it is out
-of scope for the v2 implementation sweep because the current system does not
-have a high-bandwidth streaming link.
+Camera/video streaming is out of scope. Inspection uses typed vector geometry;
+the operator UI has no camera placeholder or inactive player.
 
 GUI v2 maps the legacy Tk `put_img()`/`label_viz` powerline visualization to
 the Map page and dashboard mini-map. Live powerline/perception diagnostics stay
 on the Perception page. High-bandwidth camera/video remains an explicit
-deferred item: v2 may show a disabled scope panel, but it must not implement a
-stream player, WebRTC/MJPEG endpoint, or frame transport.
+deferred item and no scope panel, stream player, WebRTC/MJPEG endpoint, or frame
+transport is implemented.
 
 Future runtime contracts may expose read-only stream metadata such as stream
 id, label, media kind, transport kind, availability, endpoint hint, resolution,

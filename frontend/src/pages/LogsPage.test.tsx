@@ -84,7 +84,8 @@ describe("LogsPage", () => {
   it("starts follow, stops follow, and closes follow when changing source", async () => {
     const close = vi.fn();
     const logsClient = client({
-      follow: vi.fn((_sourceId, onLine) => {
+      follow: vi.fn((_sourceId, onLine, _onError, onState) => {
+        onState?.(true);
         onLine({ source_id: "daemon", source_label: "Daemon", kind: "file", line: "streamed" });
         return { close };
       }),
@@ -93,7 +94,7 @@ describe("LogsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Follow" }));
 
-    expect(logsClient.follow).toHaveBeenCalledWith("daemon", expect.any(Function), expect.any(Function));
+    expect(logsClient.follow).toHaveBeenCalledWith("daemon", expect.any(Function), expect.any(Function), expect.any(Function));
     await waitFor(() => expect(screen.getByRole("log")).toHaveTextContent("[Daemon] streamed"));
 
     fireEvent.click(screen.getByRole("button", { name: "Stop follow" }));

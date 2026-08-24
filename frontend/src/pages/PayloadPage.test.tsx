@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeStoreState } from "../state";
@@ -44,20 +44,21 @@ describe("PayloadPage", () => {
     expect(screen.getByText("18.5 W")).toBeInTheDocument();
   });
 
-  it("wires gripper open and close commands", () => {
+  it("wires stateful gripper open and close commands", async () => {
     const dispatchCommand = vi.fn().mockResolvedValue({
       request_id: "open-1",
       command_id: "payload.gripper.open",
       accepted: true,
       message: "opened",
     });
-    render(<PayloadPage state={state()} dispatchCommand={dispatchCommand} />);
+    const { rerender } = render(<PayloadPage state={state()} dispatchCommand={dispatchCommand} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Open gripper" }));
+    await waitFor(() => expect(dispatchCommand).toHaveBeenCalledWith("payload.gripper.open"));
+    rerender(<PayloadPage state={state({ domains: { payload: { ...state().domains.payload, gripper_status: "open" } } })} dispatchCommand={dispatchCommand} />);
     fireEvent.click(screen.getByRole("button", { name: "Close gripper" }));
 
-    expect(dispatchCommand).toHaveBeenCalledWith("payload.gripper.open");
-    expect(dispatchCommand).toHaveBeenCalledWith("payload.gripper.close");
+    await waitFor(() => expect(dispatchCommand).toHaveBeenCalledWith("payload.gripper.close"));
   });
 
   it("disables gripper controls in mission mode", () => {
@@ -68,8 +69,7 @@ describe("PayloadPage", () => {
       />,
     );
 
-    expect(screen.getByText("gripper commands are disabled in Mission mode")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open gripper" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Open gripper" })).toHaveAccessibleDescription("gripper commands are disabled in Mission mode");
   });
 
   it("disables gripper controls during active custom operation", () => {
@@ -80,20 +80,19 @@ describe("PayloadPage", () => {
       />,
     );
 
-    expect(screen.getByText("gripper commands are disabled while a custom operation action is active")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Close gripper" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Close gripper" })).toHaveAccessibleDescription("gripper commands are disabled while a custom operation action is active");
   });
 
   it("shows command rejections", async () => {
     const dispatchCommand = vi.fn().mockResolvedValue({
       request_id: "close-1",
-      command_id: "payload.gripper.close",
+      command_id: "payload.gripper.open",
       accepted: false,
       rejection: { code: "forbidden", message: "service unavailable" },
     });
     render(<PayloadPage state={state()} dispatchCommand={dispatchCommand} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close gripper" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open gripper" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("service unavailable");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

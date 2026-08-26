@@ -42,7 +42,7 @@ from iii_drone_interfaces.msg import (
     
 )
 from iii_drone_interfaces.srv import GripperCommand
-from iii_drone_interfaces.srv import PLMapperCommand, UpdatePowerlineOverview, OverrideMissionSpecification
+from iii_drone_interfaces.srv import PLMapperCommand, SelectMissionCatalogEntry, UpdatePowerlineOverview
 from iii_drone_interfaces.srv import GetParameterYaml, GetDeclaredParameters, SaveParameters, GetParameterFiles, LoadParameters, SetParameterFromGC, GetCurrentParameterFile
 
 ###############################################################################
@@ -154,9 +154,9 @@ class IIIGCNode(Node):
         self.pl_mapper_command_srv_client = self.create_client(PLMapperCommand, "/perception/pl_mapper/pl_mapper_command")
 
         self.update_powerline_overview_srv_client = self.create_client(UpdatePowerlineOverview, "/mission/powerline_overview_provider/update_powerline_overview")
-        self.override_mission_specification_srv_client = self.create_client(
-            OverrideMissionSpecification,
-            "/mission/mission_executor/override_mission_specification",
+        self.select_mission_catalog_entry_srv_client = self.create_client(
+            SelectMissionCatalogEntry,
+            "/mission/mission_executor/select_mission_catalog_entry",
         )
         self.operations_client = OperationsClient(self) if OperationsClient is not None else None
 
@@ -982,27 +982,27 @@ class IIIGCNode(Node):
                 self.action_status = "Failed"
                 self.action_status_lock_.release()
 
-    def send_override_mission_specification_command(self, mission_specification_file: str = "", use_default: bool = False):
+    def send_select_mission_catalog_entry_command(self, catalog_id: str = "", use_default: bool = False):
         if self.action_status_lock_.acquire(blocking=True):
-            self.current_action = "OverrideMissionSpecification"
+            self.current_action = "SelectMissionCatalogEntry"
             self.action_status = "Waiting for reply"
             self.action_status_lock_.release()
 
-        if not self.override_mission_specification_srv_client.wait_for_service(timeout_sec=5.0):
+        if not self.select_mission_catalog_entry_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
                 self.action_status_lock_.release()
             return
 
-        request = OverrideMissionSpecification.Request()
-        request.mission_specification_file = mission_specification_file
+        request = SelectMissionCatalogEntry.Request()
+        request.catalog_id = catalog_id
         request.use_default = use_default
 
-        future = self.override_mission_specification_srv_client.call_async(request)
-        future.add_done_callback(self.override_mission_specification_response_callback)
+        future = self.select_mission_catalog_entry_srv_client.call_async(request)
+        future.add_done_callback(self.select_mission_catalog_entry_response_callback)
 
-    def override_mission_specification_response_callback(self, future: rclpy.Future):
-        response: OverrideMissionSpecification.Response = future.result()
+    def select_mission_catalog_entry_response_callback(self, future: rclpy.Future):
+        response: SelectMissionCatalogEntry.Response = future.result()
 
         if response.success:
             if self.action_status_lock_.acquire(blocking=True):

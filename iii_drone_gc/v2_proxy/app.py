@@ -11,7 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from iii_drone_contracts import ApiCompatibility
 from iii_drone_contracts.envelopes import ContractModel
 
-from .discovery import ManualEndpointRequest, RuntimeDiscoveryService, RuntimeEndpointSummary
+from .discovery import (
+    ManualEndpointRequest,
+    ReceiverClockSyncCompanion,
+    RuntimeDiscoveryService,
+    RuntimeEndpointSummary,
+)
 from .proxy import (
     HttpxProxyHttpClient,
     ProxyHttpClient,
@@ -49,9 +54,13 @@ class GCProxySettings:
         expected_profile = os.environ.get("III_GC_EXPECTED_PROFILE")
         expected_runtime_id = os.environ.get("III_GC_EXPECTED_RUNTIME_ID")
         expected_system_id = os.environ.get("III_GC_EXPECTED_SYSTEM_ID")
-        runtime_request_timeout_s = float(os.environ.get("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "30"))
+        runtime_request_timeout_s = float(
+            os.environ.get("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "30")
+        )
         if runtime_request_timeout_s <= 0:
-            raise RuntimeError("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC must be greater than zero")
+            raise RuntimeError(
+                "III_GC_RUNTIME_REQUEST_TIMEOUT_SEC must be greater than zero"
+            )
         if expected_profile == "real":
             missing = [
                 name
@@ -62,9 +71,13 @@ class GCProxySettings:
                 if not value
             ]
             if missing:
-                raise RuntimeError("real ground-control profile requires: " + ", ".join(missing))
+                raise RuntimeError(
+                    "real ground-control profile requires: " + ", ".join(missing)
+                )
             if not cors_origins or "*" in cors_origins:
-                raise RuntimeError("real ground-control profile requires explicit III_GC_PROXY_CORS_ORIGINS")
+                raise RuntimeError(
+                    "real ground-control profile requires explicit III_GC_PROXY_CORS_ORIGINS"
+                )
         return cls(
             proxy_id=os.environ.get("III_GC_PROXY_ID", "iii-gc-proxy"),
             proxy_name=os.environ.get("III_GC_PROXY_NAME", "III Ground Control Proxy"),
@@ -92,14 +105,18 @@ def create_app(
     websocket_proxy: WebSocketProxyTransport | None = None,
 ) -> FastAPI:
     proxy_settings = settings or GCProxySettings.from_env()
-    runtime_discovery = discovery_service or RuntimeDiscoveryService()
+    runtime_discovery = discovery_service or RuntimeDiscoveryService(
+        clock_sync_companion=ReceiverClockSyncCompanion()
+    )
     runtime_targets = target_manager or RuntimeTargetManager(
         discovery=runtime_discovery,
         expected_runtime_id=proxy_settings.expected_runtime_id,
         expected_system_id=proxy_settings.expected_system_id,
         expected_profile=proxy_settings.expected_profile,
     )
-    runtime_http_proxy = proxy_http_client or HttpxProxyHttpClient(timeout_s=proxy_settings.runtime_request_timeout_s)
+    runtime_http_proxy = proxy_http_client or HttpxProxyHttpClient(
+        timeout_s=proxy_settings.runtime_request_timeout_s
+    )
     runtime_ws_proxy = websocket_proxy or WebsocketsProxyTransport()
     app = FastAPI(
         title="III Ground Control Proxy",
@@ -125,23 +142,37 @@ def create_app(
         return GCProxyIdentity(
             proxy_id=proxy_settings.proxy_id,
             proxy_name=proxy_settings.proxy_name,
-            compatibility=ApiCompatibility(schema_revision=proxy_settings.schema_revision),
-            selected_runtime=target_state.selected.model_dump(mode="json") if target_state.selected else None,
+            compatibility=ApiCompatibility(
+                schema_revision=proxy_settings.schema_revision
+            ),
+            selected_runtime=(
+                target_state.selected.model_dump(mode="json")
+                if target_state.selected
+                else None
+            ),
         )
 
-    @app.get("/runtime/discovery", response_model=dict[str, list[RuntimeEndpointSummary]])
-    def runtime_discovery_results(timeout_s: float = 1.0) -> dict[str, list[RuntimeEndpointSummary]]:
+    @app.get(
+        "/runtime/discovery", response_model=dict[str, list[RuntimeEndpointSummary]]
+    )
+    def runtime_discovery_results(
+        timeout_s: float = 1.0,
+    ) -> dict[str, list[RuntimeEndpointSummary]]:
         return {"runtimes": runtime_discovery.list_runtimes(timeout_s=timeout_s)}
 
     @app.post("/runtime/discovery/manual", response_model=RuntimeEndpointSummary)
-    def add_manual_runtime_endpoint(request: ManualEndpointRequest) -> RuntimeEndpointSummary:
+    def add_manual_runtime_endpoint(
+        request: ManualEndpointRequest,
+    ) -> RuntimeEndpointSummary:
         try:
             return runtime_discovery.add_manual_endpoint(request)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/runtime/targets/validate", response_model=RuntimeEndpointSummary)
-    def validate_runtime_target(request: TargetSelectionRequest) -> RuntimeEndpointSummary:
+    def validate_runtime_target(
+        request: TargetSelectionRequest,
+    ) -> RuntimeEndpointSummary:
         try:
             return runtime_targets.validate_endpoint(request.endpoint_id)
         except ValueError as exc:
@@ -174,10 +205,14 @@ def create_app(
     async def proxy_runtime_http(path: str, request: Request) -> Response:
         selected = runtime_targets.state().selected
         if selected is None:
-            raise HTTPException(status_code=409, detail="select a runtime target before proxying")
+            raise HTTPException(
+                status_code=409, detail="select a runtime target before proxying"
+            )
         query_string = request.url.query
         try:
-            upstream_url = build_upstream_http_url(selected.base_url, path, query_string)
+            upstream_url = build_upstream_http_url(
+                selected.base_url, path, query_string
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
@@ -193,9 +228,15 @@ def create_app(
                 detail=f"{exc}; the command outcome is unknown, refresh authoritative state before retrying",
             ) from exc
         normalized_path = path.strip("/")
-        if 200 <= proxy_response.status_code < 300 and normalized_path == "session/login":
+        if (
+            200 <= proxy_response.status_code < 300
+            and normalized_path == "session/login"
+        ):
             runtime_targets.mark_browser_connected(True)
-        if 200 <= proxy_response.status_code < 300 and normalized_path == "session/logout":
+        if (
+            200 <= proxy_response.status_code < 300
+            and normalized_path == "session/logout"
+        ):
             runtime_targets.mark_browser_connected(False)
         return Response(
             content=proxy_response.content,

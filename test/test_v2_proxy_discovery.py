@@ -7,9 +7,16 @@ from iii_drone_gc.v2_proxy.discovery import (
     ManualEndpointRequest,
     RuntimeDiscoveryService,
     RuntimeEndpointSummary,
+    ReceiverClockSyncCompanion,
     StaticDiscoveryProvider,
     _endpoint_from_service_info,
 )
+
+
+class ImmediateExecutor:
+    def submit(self, function, *args):
+        function(*args)
+        return SimpleNamespace()
 
 
 def _client(provider):
@@ -57,10 +64,15 @@ def test_manual_endpoint_fallback_is_registered_through_proxy_api():
 
     added = client.post(
         "/runtime/discovery/manual",
-        json={"base_url": "http://runtime.local:8765/", "runtime_name": "Manual Runtime"},
+        json={
+            "base_url": "http://runtime.local:8765/",
+            "runtime_name": "Manual Runtime",
+        },
     )
     listing = client.get("/runtime/discovery")
-    invalid = client.post("/runtime/discovery/manual", json={"base_url": "file:///tmp/runtime"})
+    invalid = client.post(
+        "/runtime/discovery/manual", json={"base_url": "file:///tmp/runtime"}
+    )
 
     assert added.status_code == 200
     assert added.json()["source"] == "manual"
@@ -84,7 +96,9 @@ def test_discovery_collapses_manual_alias_when_mdns_has_same_base_url():
     )
     discovery = RuntimeDiscoveryService(provider=StaticDiscoveryProvider([endpoint]))
     discovery.add_manual_endpoint(
-        ManualEndpointRequest(base_url="http://127.0.0.1:8765", runtime_name="local-sim")
+        ManualEndpointRequest(
+            base_url="http://127.0.0.1:8765", runtime_name="local-sim"
+        )
     )
 
     runtimes = discovery.list_runtimes()
@@ -93,7 +107,10 @@ def test_discovery_collapses_manual_alias_when_mdns_has_same_base_url():
     assert runtimes[0].endpoint_id == "iii-runtime"
     assert runtimes[0].runtime_name == "III Runtime"
     assert runtimes[0].source == "mdns"
-    assert discovery.endpoint_by_id("manual:http://127.0.0.1:8765").runtime_name == "local-sim"
+    assert (
+        discovery.endpoint_by_id("manual:http://127.0.0.1:8765").runtime_name
+        == "local-sim"
+    )
 
 
 def test_fake_zeroconf_service_info_is_normalized_to_discovery_summary():
@@ -109,7 +126,9 @@ def test_fake_zeroconf_service_info_is_normalized_to_discovery_summary():
         parsed_addresses=lambda: ["192.168.1.20"],
     )
 
-    endpoint = _endpoint_from_service_info(name="Real Runtime._iii-runtime-api._tcp.local.", info=info)
+    endpoint = _endpoint_from_service_info(
+        name="Real Runtime._iii-runtime-api._tcp.local.", info=info
+    )
 
     assert endpoint.endpoint_id == "runtime-2"
     assert endpoint.source == "mdns"
@@ -118,3 +137,102 @@ def test_fake_zeroconf_service_info_is_normalized_to_discovery_summary():
     assert endpoint.api_version == "v2alpha1"
     assert endpoint.profile == "real"
     assert endpoint.reachable is True
+
+
+def test_real_mdns_discovery_invokes_fixed_clock_sync_once_until_disappearance():
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    endpoint = RuntimeEndpointSummary(
+        endpoint_id="runtime-real",
+        source="mdns",
+        runtime_name="Real Runtime",
+        base_url="http://192.168.1.20:8765",
+        address="192.168.1.20",
+        port=8765,
+        profile="real",
+        reachable=True,
+    )
+    provider = StaticDiscoveryProvider([endpoint])
+    companion = ReceiverClockSyncCompanion(executor=ImmediateExecutor(), runner=runner)
+    discovery = RuntimeDiscoveryService(
+        provider=provider, clock_sync_companion=companion
+    )
+    discovery.list_runtimes()
+    discovery.list_runtimes()
+    assert len(calls) == 1
+    assert calls[0][0] == [
+        "iii",
+        "system",
+        "clock",
+        "sync",
+        "--target",
+        "real",
+        "--profile",
+        "real",
+        "--confirm",
+        "--non-interactive",
+        "--json",
+    ]
+    assert calls[0][1]["timeout"] == 45
+
+
+def test_sim_and_manual_discovery_never_invoke_clock_sync():
+    calls = []
+    companion = ReceiverClockSyncCompanion(
+        executor=ImmediateExecutor(),
+        runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    endpoints = [
+        RuntimeEndpointSummary(
+            endpoint_id="runtime-sim",
+            source="mdns",
+            runtime_name="Simulation",
+            base_url="http://127.0.0.1:8765",
+            address="127.0.0.1",
+            port=8765,
+            profile="sim",
+            reachable=True,
+        ),
+        RuntimeEndpointSummary(
+            endpoint_id="manual-real",
+            source="manual",
+            runtime_name="Manual",
+            base_url="http://192.168.1.20:8765",
+            address="192.168.1.20",
+            port=8765,
+            profile="real",
+            reachable=True,
+        ),
+    ]
+    companion.discovered(endpoints)
+    assert calls == []
+
+
+def test_failed_clock_sync_is_not_retried_until_runtime_reappears():
+    calls = []
+
+    def runner(*args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=30, stdout="", stderr="refused")
+
+    endpoint = RuntimeEndpointSummary(
+        endpoint_id="runtime-real",
+        source="mdns",
+        runtime_name="Real Runtime",
+        base_url="http://192.168.1.20:8765",
+        address="192.168.1.20",
+        port=8765,
+        profile="real",
+        reachable=True,
+    )
+    companion = ReceiverClockSyncCompanion(executor=ImmediateExecutor(), runner=runner)
+    companion.discovered([endpoint])
+    companion.discovered([endpoint])
+    companion.discovered([])
+    companion.discovered([endpoint])
+
+    assert len(calls) == 2

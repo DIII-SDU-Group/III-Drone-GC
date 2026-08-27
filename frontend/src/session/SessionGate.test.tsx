@@ -187,9 +187,11 @@ describe("SessionGate", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
 
-    await waitFor(() => expect(client.logout).toHaveBeenCalledWith("session-token"));
-    expect(window.sessionStorage.getItem("iii-gc-v2-session")).toBeNull();
-    expect(FakeWebSocket.instances[0].close).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(client.logout).toHaveBeenCalledWith("session-token");
+      expect(window.sessionStorage.getItem("iii-gc-v2-session")).toBeNull();
+      expect(FakeWebSocket.instances[0].close).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("revalidates a remembered endpoint without exposing runtime state before login", async () => {

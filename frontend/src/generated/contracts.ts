@@ -91,6 +91,26 @@ export interface ConfigurationStatus {
   default_snapshot_id?: string | null;
   pending_restart?: boolean;
   pending_constant_names?: Array<string>;
+  pending_boot_values?: Record<string, unknown>;
+  tuning_session_id?: string | null;
+  tuning_baseline_id?: string | null;
+  tuning_target_id?: string | null;
+  tuning_runtime_profile?: string | null;
+  tuning_release_id?: string | null;
+  tuning_workspace_id?: string | null;
+  tuning_manifest_id?: string | null;
+  tuning_revision?: number;
+  tuning_journal_sequence?: number;
+  tuning_journal_checksum?: string | null;
+  tuning_created_at?: string | null;
+  tuning_updated_at?: string | null;
+  configuration_divergent?: boolean;
+  divergent_observations?: Record<string, unknown>;
+  mirror_state?: "not-required" | "degraded" | "current";
+  mirror_ack_revision?: number | null;
+  mirror_ack_sequence?: number | null;
+  mirror_ack_checksum?: string | null;
+  mirror_error?: string | null;
   badges?: Array<"Pending edits" | "Unsaved" | "Non-default" | "Restart required">;
 }
 
@@ -704,12 +724,20 @@ export interface CommandResultMessage {
 
 export interface ConfigurationApplyRequest {
   edits: Array<ParameterEdit>;
+  request_id?: string | null;
+  expected_revision?: number | null;
+  operator_id?: string | null;
 }
 
 export interface ConfigurationApplyResponse {
   ok: boolean;
   results: Array<ParameterApplyResult>;
   status?: ConfigurationStatus;
+  session_id?: string | null;
+  transaction_id?: string | null;
+  revision?: number | null;
+  transaction_status?: string | null;
+  idempotent_replay?: boolean;
 }
 
 export interface ConfigurationManifest {

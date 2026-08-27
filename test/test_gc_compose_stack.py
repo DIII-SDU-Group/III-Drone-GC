@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -22,6 +21,11 @@ def test_gc_compose_stacks_define_frontend_and_proxy_services():
     assert "III_GC_PROXY_HOST: 127.0.0.1" in prod
     assert "npm run dev" in dev
     assert "${III_GC_FRONTEND_PORT:-5173}:5173" in dev
+    for compose in (dev, default):
+        assert "mirror:" in compose
+        assert "iii-gc-companion --role mirror --runtime-host localhost" in compose
+        assert "/workspace/.iii/operations/.mirror-state" in compose
+        assert "III_RUNTIME_API_CLI_TOKEN" in compose
 
 
 def test_gc_container_definitions_do_not_install_ros_packages():
@@ -45,7 +49,9 @@ def test_gc_container_definitions_do_not_install_ros_packages():
 def test_gc_release_images_pin_exact_base_images_and_proxy_dependencies():
     proxy = (PACKAGE_ROOT / "docker" / "proxy.Dockerfile").read_text(encoding="utf-8")
     frontend = (PACKAGE_ROOT / "frontend" / "Dockerfile").read_text(encoding="utf-8")
-    lock = (PACKAGE_ROOT / "docker" / "proxy-requirements.lock").read_text(encoding="utf-8")
+    lock = (PACKAGE_ROOT / "docker" / "proxy-requirements.lock").read_text(
+        encoding="utf-8"
+    )
 
     assert proxy.startswith("FROM python:3.12.14-slim-trixie@sha256:")
     assert frontend.startswith("FROM node:22.20.0-alpine3.22@sha256:")
@@ -60,8 +66,12 @@ def test_gc_release_images_pin_exact_base_images_and_proxy_dependencies():
 
 
 def test_gui_v2_security_docs_record_trusted_network_decision():
-    deployment = (PACKAGE_ROOT / "docs" / "gui-v2-deployment.md").read_text(encoding="utf-8")
-    checklist = (PACKAGE_ROOT / "docs" / "gui-v2-security-checklist.md").read_text(encoding="utf-8")
+    deployment = (PACKAGE_ROOT / "docs" / "gui-v2-deployment.md").read_text(
+        encoding="utf-8"
+    )
+    checklist = (PACKAGE_ROOT / "docs" / "gui-v2-security-checklist.md").read_text(
+        encoding="utf-8"
+    )
     spec = (PACKAGE_ROOT / "docs" / "gui-v2-spec.md").read_text(encoding="utf-8")
 
     for text in (deployment, checklist, spec):

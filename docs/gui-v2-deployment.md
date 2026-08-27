@@ -136,6 +136,15 @@ be able to distinguish live/stored conductors, drone, target, pylons, stale
 warnings, and capture controls in direct outdoor light without relying on
 color alone. Phone and touch-only layouts are not acceptance targets.
 
+Configuration tuning shows only a compact GC mirror state. `degraded` means the
+target WAL is still authoritative and Apply remains available; the automatically
+started mirror backfills and returns to `current` after connectivity recovers.
+The page deliberately has no tuning-session controls. Snapshot rows show the
+corresponding `iii config capture pull` command instead of claiming that a YAML
+response discarded by the browser command channel was downloaded. Field login
+starts `iii-gc-mirror.service`; the local Compose simulation workflow starts the
+same ROS-free companion against authenticated `localhost` simulation only.
+
 ## Network Ports
 
 Runtime host:

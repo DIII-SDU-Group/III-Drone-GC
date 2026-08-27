@@ -25,6 +25,7 @@ setup(
         'setuptools',
         'fastapi>=0.110,<1',
         'httpx>=0.27,<1',
+        'iii-drone-contracts>=0.1.0,<0.2',
         'pydantic>=2,<3',
         'uvicorn>=0.29,<1',
         'websockets>=12,<16',

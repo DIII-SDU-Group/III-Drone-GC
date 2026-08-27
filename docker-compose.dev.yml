@@ -1,4 +1,17 @@
 services:
+  mirror:
+    build:
+      context: ../..
+      dockerfile: src/III-Drone-GC/docker/proxy.Dockerfile
+    network_mode: host
+    command: iii-gc-companion --role mirror --runtime-host localhost --state-root /workspace/.iii/operations/.mirror-state --interval 2
+    environment:
+      WORKSPACE_DIR: /workspace
+      III_RUNTIME_API_CLI_TOKEN: ${III_RUNTIME_API_CLI_TOKEN:-dev-cli-token}
+    volumes:
+      - ${WORKSPACE_DIR:-../..}/.iii:/workspace/.iii
+    restart: unless-stopped
+
   proxy:
     build:
       context: ../..
@@ -26,6 +39,7 @@ services:
       - "${III_GC_FRONTEND_PORT:-5173}:5173"
     depends_on:
       - proxy
+      - mirror
     restart: unless-stopped
 
 volumes:

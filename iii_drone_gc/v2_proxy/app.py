@@ -13,7 +13,6 @@ from iii_drone_contracts.envelopes import ContractModel
 
 from .discovery import (
     ManualEndpointRequest,
-    ReceiverClockSyncCompanion,
     RuntimeDiscoveryService,
     RuntimeEndpointSummary,
 )
@@ -105,9 +104,10 @@ def create_app(
     websocket_proxy: WebSocketProxyTransport | None = None,
 ) -> FastAPI:
     proxy_settings = settings or GCProxySettings.from_env()
-    runtime_discovery = discovery_service or RuntimeDiscoveryService(
-        clock_sync_companion=ReceiverClockSyncCompanion()
-    )
+    # Clock synchronization is owned by the independent login companion.  The
+    # proxy remains request-driven and must not turn browser discovery polls into
+    # a second scheduler for the privileged receiver operation.
+    runtime_discovery = discovery_service or RuntimeDiscoveryService()
     runtime_targets = target_manager or RuntimeTargetManager(
         discovery=runtime_discovery,
         expected_runtime_id=proxy_settings.expected_runtime_id,

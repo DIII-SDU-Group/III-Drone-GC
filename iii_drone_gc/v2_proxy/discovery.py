@@ -15,8 +15,8 @@ from pydantic import Field
 
 from iii_drone_contracts.envelopes import ContractModel
 
-
 RUNTIME_API_SERVICE_TYPE = "_iii-runtime-api._tcp.local."
+AIRCRAFT_MDNS_HOSTNAME = "iii.local"
 
 
 def _utc_now() -> datetime:
@@ -125,8 +125,13 @@ class StaticDiscoveryProvider:
 
 
 class ZeroconfDiscoveryProvider:
-    def __init__(self, service_type: str = RUNTIME_API_SERVICE_TYPE):
+    def __init__(
+        self,
+        service_type: str = RUNTIME_API_SERVICE_TYPE,
+        allowed_hostname: str = AIRCRAFT_MDNS_HOSTNAME,
+    ):
         self.service_type = service_type
+        self.allowed_hostname = allowed_hostname.rstrip(".").lower()
 
     def scan(self, *, timeout_s: float = 1.0) -> list[RuntimeEndpointSummary]:
         try:
@@ -141,7 +146,8 @@ class ZeroconfDiscoveryProvider:
                 info = zeroconf.get_service_info(
                     service_type, name, timeout=int(timeout_s * 1000)
                 )
-                if info is not None:
+                server = str(getattr(info, "server", "")).rstrip(".").lower()
+                if info is not None and server == self_outer.allowed_hostname:
                     endpoint = _endpoint_from_service_info(name=name, info=info)
                     endpoints[endpoint.endpoint_id] = endpoint
 
@@ -155,6 +161,7 @@ class ZeroconfDiscoveryProvider:
             ) -> None:
                 del zeroconf, service_type, name
 
+        self_outer = self
         zeroconf = Zeroconf()
         try:
             ServiceBrowser(zeroconf, self.service_type, _Listener())

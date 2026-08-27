@@ -42,6 +42,7 @@ setup(
         "console_scripts": [
             "gui = iii_drone_gc.gui:main",
             "iii-gc-proxy = iii_drone_gc.v2_proxy.main:main",
+            "iii-gc-companion = iii_drone_gc.v2_companion:main",
         ]
     }
 )

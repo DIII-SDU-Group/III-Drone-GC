@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+import pytest
 
 from iii_drone_gc.v2_proxy.app import GCProxySettings, create_app
 from iii_drone_gc.v2_proxy.discovery import (
@@ -137,6 +138,80 @@ def test_fake_zeroconf_service_info_is_normalized_to_discovery_summary():
     assert endpoint.api_version == "v2alpha1"
     assert endpoint.profile == "real"
     assert endpoint.reachable is True
+
+
+@pytest.mark.parametrize("hostname", ["unexpected.local.", ""])
+def test_automatic_zeroconf_provider_rejects_non_aircraft_hostname(
+    monkeypatch, hostname
+):
+    from iii_drone_gc.v2_proxy.discovery import ZeroconfDiscoveryProvider
+
+    class Info:
+        server = hostname
+        port = 8765
+        properties = {b"profile": b"real"}
+
+        def parsed_addresses(self):
+            return ["192.168.1.50"]
+
+    class Zeroconf:
+        def get_service_info(self, *_args, **_kwargs):
+            return Info()
+
+        def close(self):
+            pass
+
+    class Browser:
+        def __init__(self, zeroconf, service_type, listener):
+            listener.add_service(zeroconf, service_type, "rogue")
+
+    class Listener:
+        pass
+
+    import zeroconf
+
+    monkeypatch.setattr(zeroconf, "Zeroconf", Zeroconf)
+    monkeypatch.setattr(zeroconf, "ServiceBrowser", Browser)
+    monkeypatch.setattr(zeroconf, "ServiceListener", Listener)
+    monkeypatch.setattr("iii_drone_gc.v2_proxy.discovery.sleep", lambda _seconds: None)
+
+    assert ZeroconfDiscoveryProvider().scan(timeout_s=0.1) == []
+
+
+def test_automatic_zeroconf_provider_accepts_only_iii_local(monkeypatch):
+    from iii_drone_gc.v2_proxy.discovery import ZeroconfDiscoveryProvider
+
+    class Info:
+        server = "iii.local."
+        port = 8765
+        properties = {b"runtime_id": b"aircraft", b"profile": b"real"}
+
+        def parsed_addresses(self):
+            return ["192.168.1.50"]
+
+    class Zeroconf:
+        def get_service_info(self, *_args, **_kwargs):
+            return Info()
+
+        def close(self):
+            pass
+
+    class Browser:
+        def __init__(self, zeroconf, service_type, listener):
+            listener.add_service(zeroconf, service_type, "aircraft")
+
+    class Listener:
+        pass
+
+    import zeroconf
+
+    monkeypatch.setattr(zeroconf, "Zeroconf", Zeroconf)
+    monkeypatch.setattr(zeroconf, "ServiceBrowser", Browser)
+    monkeypatch.setattr(zeroconf, "ServiceListener", Listener)
+    monkeypatch.setattr("iii_drone_gc.v2_proxy.discovery.sleep", lambda _seconds: None)
+
+    endpoints = ZeroconfDiscoveryProvider().scan(timeout_s=0.1)
+    assert [endpoint.endpoint_id for endpoint in endpoints] == ["aircraft"]
 
 
 def test_real_mdns_discovery_invokes_fixed_clock_sync_once_until_disappearance():

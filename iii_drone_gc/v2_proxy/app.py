@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +43,7 @@ class GCProxySettings:
     expected_system_id: str | None = None
     expected_profile: str | None = None
     runtime_request_timeout_s: float = 30.0
+    maintenance_drain_file: str | None = None
 
     @classmethod
     def from_env(cls) -> "GCProxySettings":
@@ -56,6 +61,7 @@ class GCProxySettings:
         runtime_request_timeout_s = float(
             os.environ.get("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "30")
         )
+        maintenance_drain_file = os.environ.get("III_GC_MAINTENANCE_DRAIN_FILE")
         if runtime_request_timeout_s <= 0:
             raise RuntimeError(
                 "III_GC_RUNTIME_REQUEST_TIMEOUT_SEC must be greater than zero"
@@ -86,6 +92,7 @@ class GCProxySettings:
             expected_system_id=expected_system_id,
             expected_profile=expected_profile,
             runtime_request_timeout_s=runtime_request_timeout_s,
+            maintenance_drain_file=maintenance_drain_file,
         )
 
 
@@ -132,9 +139,67 @@ def create_app(
             allow_headers=["*"],
         )
 
+    def maintenance_state() -> dict[str, Any]:
+        drain_file = proxy_settings.maintenance_drain_file
+        if not drain_file:
+            return {"drained": False, "operation_id": None, "marker_valid": True}
+        path = Path(drain_file)
+        try:
+            raw = path.read_bytes()
+        except FileNotFoundError:
+            return {"drained": False, "operation_id": None, "marker_valid": True}
+        except OSError:
+            return {"drained": True, "operation_id": None, "marker_valid": False}
+        try:
+            marker = json.loads(raw)
+            if not isinstance(marker, dict):
+                raise ValueError("marker must be an object")
+            expected_keys = {
+                "schema",
+                "operation_id",
+                "enabled",
+                "drain_id",
+            }
+            if set(marker) != expected_keys:
+                raise ValueError("marker fields do not match the drain contract")
+            if marker["schema"] != "iii.gc-browser-drain/v1":
+                raise ValueError("marker schema is unsupported")
+            if marker["enabled"] is not True:
+                raise ValueError("marker must explicitly enable the drain")
+            if (
+                not isinstance(marker["operation_id"], str)
+                or not marker["operation_id"]
+            ):
+                raise ValueError("marker operation_id is invalid")
+            identity_input = {
+                key: value for key, value in marker.items() if key != "drain_id"
+            }
+            canonical = json.dumps(
+                identity_input,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            expected_identity = hashlib.sha256(canonical).hexdigest()
+            if marker["drain_id"] != expected_identity:
+                raise ValueError("marker content identity is invalid")
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            # A present but unreadable marker must fail closed. An updater crash
+            # may otherwise re-enable mutation while its selector transaction is
+            # still unresolved.
+            return {"drained": True, "operation_id": None, "marker_valid": False}
+        return {
+            "drained": True,
+            "operation_id": marker["operation_id"],
+            "marker_valid": True,
+        }
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"proxy": "up"}
+
+    @app.get("/maintenance/status")
+    def maintenance_status() -> dict[str, Any]:
+        return maintenance_state()
 
     @app.get("/identity", response_model=GCProxyIdentity)
     def identity() -> GCProxyIdentity:
@@ -203,6 +268,11 @@ def create_app(
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
     async def proxy_runtime_http(path: str, request: Request) -> Response:
+        if request.method not in {"GET", "OPTIONS"} and maintenance_state()["drained"]:
+            raise HTTPException(
+                status_code=503,
+                detail="ground control is drained for a maintenance transaction",
+            )
         selected = runtime_targets.state().selected
         if selected is None:
             raise HTTPException(
@@ -246,6 +316,9 @@ def create_app(
 
     @app.websocket("/proxy/ws/{path:path}")
     async def proxy_runtime_websocket(websocket: WebSocket, path: str):
+        if maintenance_state()["drained"]:
+            await websocket.close(code=1013)
+            return
         selected = runtime_targets.state().selected
         if selected is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

@@ -245,12 +245,19 @@ export interface MissionModeRegistryEntry {
 }
 
 export interface MissionSpecificationIdentity {
-  active_path?: string | null;
-  canonical_path?: string | null;
-  label?: string | null;
-  content_hash?: string | null;
-  canonical_loaded?: boolean | null;
-  configuration_profile?: string;
+  catalog_id?: string | null;
+  catalog_hash?: string | null;
+  entry_hash?: string | null;
+  specification_asset_id?: string | null;
+  behavior_tree_asset_ids?: Array<string>;
+  default_catalog_id?: string | null;
+  classification?: "production" | "experimental" | "test" | "legacy" | "unknown";
+  compatible_profiles?: Array<string>;
+  active_profile?: string;
+  temporary_override?: boolean;
+  experimental?: boolean;
+  experimental_warning?: string | null;
+  catalog_ready?: boolean;
   load_error?: string | null;
 }
 

@@ -1,9 +1,16 @@
+import hashlib
+import json
+
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from iii_drone_contracts import ApiCompatibility, ApiIdentity
 from iii_drone_gc.v2_proxy.app import GCProxySettings, create_app
-from iii_drone_gc.v2_proxy.discovery import RuntimeDiscoveryService, RuntimeEndpointSummary, StaticDiscoveryProvider
+from iii_drone_gc.v2_proxy.discovery import (
+    RuntimeDiscoveryService,
+    RuntimeEndpointSummary,
+    StaticDiscoveryProvider,
+)
 from iii_drone_gc.v2_proxy.proxy import ProxyHttpResponse, ProxyUpstreamTimeout
 from iii_drone_gc.v2_proxy.targets import RuntimeTargetManager
 
@@ -23,7 +30,9 @@ class _FakeHttpProxyClient:
         self.requests = []
 
     async def request(self, *, method, url, headers, content):
-        self.requests.append({"method": method, "url": url, "headers": headers, "content": content})
+        self.requests.append(
+            {"method": method, "url": url, "headers": headers, "content": content}
+        )
         return ProxyHttpResponse(
             status_code=200,
             headers={"content-type": "application/json", "x-upstream": "runtime"},
@@ -61,12 +70,15 @@ def _endpoint():
     )
 
 
-def _client(*, select=True, http_proxy=None, websocket_proxy=None):
+def _client(*, select=True, http_proxy=None, websocket_proxy=None, settings=None):
     discovery = RuntimeDiscoveryService(provider=StaticDiscoveryProvider([_endpoint()]))
-    manager = RuntimeTargetManager(discovery=discovery, identity_client=_FakeIdentityClient())
+    manager = RuntimeTargetManager(
+        discovery=discovery, identity_client=_FakeIdentityClient()
+    )
     client = TestClient(
         create_app(
-            settings=GCProxySettings(proxy_id="gc-test", proxy_name="GC Test Proxy"),
+            settings=settings
+            or GCProxySettings(proxy_id="gc-test", proxy_name="GC Test Proxy"),
             discovery_service=discovery,
             target_manager=manager,
             proxy_http_client=http_proxy,
@@ -74,7 +86,12 @@ def _client(*, select=True, http_proxy=None, websocket_proxy=None):
         )
     )
     if select:
-        assert client.post("/runtime/target/select", json={"endpoint_id": "runtime-1"}).status_code == 200
+        assert (
+            client.post(
+                "/runtime/target/select", json={"endpoint_id": "runtime-1"}
+            ).status_code
+            == 200
+        )
     return client, manager
 
 
@@ -156,9 +173,15 @@ def test_websocket_proxy_bridges_selected_runtime_and_clears_connection_on_disco
 
     assert websocket_proxy.upstream_urls == ["ws://10.0.0.2:8765/ws?token=abc"]
     assert websocket_proxy.headers[-1]["authorization"] == "Bearer runtime-token"
-    assert "sec-websocket-key" not in {key.lower() for key in websocket_proxy.headers[-1]}
-    assert "sec-websocket-version" not in {key.lower() for key in websocket_proxy.headers[-1]}
-    assert "sec-websocket-extensions" not in {key.lower() for key in websocket_proxy.headers[-1]}
+    assert "sec-websocket-key" not in {
+        key.lower() for key in websocket_proxy.headers[-1]
+    }
+    assert "sec-websocket-version" not in {
+        key.lower() for key in websocket_proxy.headers[-1]
+    }
+    assert "sec-websocket-extensions" not in {
+        key.lower() for key in websocket_proxy.headers[-1]
+    }
     assert manager.state().browser_connected is False
 
 
@@ -172,7 +195,9 @@ def test_websocket_proxy_rejects_when_no_runtime_selected():
     except WebSocketDisconnect as exc:
         assert exc.code == 1008
     else:
-        raise AssertionError("websocket unexpectedly connected without selected runtime")
+        raise AssertionError(
+            "websocket unexpectedly connected without selected runtime"
+        )
     assert websocket_proxy.upstream_urls == []
 
 
@@ -186,5 +211,78 @@ def test_websocket_proxy_rejects_absolute_upstream_paths():
     except WebSocketDisconnect as exc:
         assert exc.code == 1008
     else:
-        raise AssertionError("websocket unexpectedly connected to absolute upstream path")
+        raise AssertionError(
+            "websocket unexpectedly connected to absolute upstream path"
+        )
     assert websocket_proxy.upstream_urls == []
+
+
+def test_maintenance_drain_rejects_new_mutations_and_websockets_but_allows_reads(
+    tmp_path,
+):
+    marker = {
+        "schema": "iii.gc-browser-drain/v1",
+        "operation_id": "paired-update-1",
+        "enabled": True,
+    }
+    marker["drain_id"] = hashlib.sha256(
+        json.dumps(marker, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    drain_file = tmp_path / "drain.json"
+    drain_file.write_text(json.dumps(marker))
+    http_proxy = _FakeHttpProxyClient()
+    websocket_proxy = _FakeWebSocketProxy()
+    client, _manager = _client(
+        select=True,
+        http_proxy=http_proxy,
+        websocket_proxy=websocket_proxy,
+        settings=GCProxySettings(
+            proxy_id="gc-test",
+            proxy_name="GC Test Proxy",
+            maintenance_drain_file=str(drain_file),
+        ),
+    )
+
+    state = client.get("/maintenance/status")
+    read = client.get("/proxy/identity")
+    mutation = client.post("/proxy/commands/actions/start", json={"request_id": "req"})
+
+    assert state.json() == {
+        "drained": True,
+        "operation_id": "paired-update-1",
+        "marker_valid": True,
+    }
+    assert read.status_code == 200
+    assert mutation.status_code == 503
+    assert all(request["method"] != "POST" for request in http_proxy.requests)
+    try:
+        with client.websocket_connect("/proxy/ws/ws"):
+            pass
+    except WebSocketDisconnect as exc:
+        assert exc.code == 1013
+    else:
+        raise AssertionError(
+            "websocket unexpectedly connected during maintenance drain"
+        )
+    assert websocket_proxy.upstream_urls == []
+
+
+def test_malformed_maintenance_marker_fails_closed(tmp_path):
+    drain_file = tmp_path / "drain.json"
+    drain_file.write_text('{"enabled": true}')
+    client, _manager = _client(
+        select=True,
+        http_proxy=_FakeHttpProxyClient(),
+        settings=GCProxySettings(
+            proxy_id="gc-test",
+            proxy_name="GC Test Proxy",
+            maintenance_drain_file=str(drain_file),
+        ),
+    )
+
+    assert client.get("/maintenance/status").json() == {
+        "drained": True,
+        "operation_id": None,
+        "marker_valid": False,
+    }
+    assert client.post("/proxy/commands/actions/start", json={}).status_code == 503

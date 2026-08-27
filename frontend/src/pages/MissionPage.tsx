@@ -143,9 +143,9 @@ export function MissionPage({
       </section>
 
       <section className="workflow-section mission-specification">
-        <div className="workflow-section__heading"><h3>Installed Inspection</h3><span>{spec?.canonical_loaded ? "canonical" : "not verified"}</span></div>
+        <div className="workflow-section__heading"><h3>Installed Inspection</h3><span>{spec?.catalog_ready ? spec.temporary_override ? "temporary override" : spec.classification ?? "verified" : "not verified"}</span></div>
         <dl className="status-list">
-          <div><dt>Specification</dt><dd>{spec?.label ?? mission?.active_spec_id ?? "unknown"}</dd></div>
+          <div><dt>Specification</dt><dd>{mission?.active_spec_id ?? spec?.catalog_id ?? "unknown"}</dd></div>
         </dl>
         {spec?.load_error ? <p className="control-reason">{spec.load_error}</p> : null}
       </section>
@@ -225,7 +225,7 @@ function inspectionStartDisabledReason(state: RuntimeStoreState): string | undef
   const mission = state.domains.mission;
   if (mission?.mission_state === "active" || mission?.modes?.some((mode) => mode.active || mode.tree_running)) return "Inspection mission is already active.";
   const inspection = mission?.modes?.find((mode) => mode.mode_key === "inspection_demo");
-  if (mission?.specification?.canonical_loaded !== true) return mission?.specification?.load_error ?? "Canonical inspection specification is not confirmed.";
+  if (mission?.specification?.catalog_ready !== true) return mission?.specification?.load_error ?? "Installed mission catalog is not ready.";
   if (!mission.required_modes_registered || !inspection?.registered || inspection.freshness !== "fresh") return "Required mission modes are not freshly registered.";
   if (!state.domains.powerline?.stored_overview_valid) return "A valid stored powerline overview is required.";
   if (!state.domains.powerline?.pylon_overview?.valid) return "Two valid pylon endpoints are required.";

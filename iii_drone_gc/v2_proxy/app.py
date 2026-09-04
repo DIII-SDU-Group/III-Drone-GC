@@ -42,7 +42,7 @@ class GCProxySettings:
     expected_runtime_id: str | None = None
     expected_system_id: str | None = None
     expected_profile: str | None = None
-    runtime_request_timeout_s: float = 30.0
+    runtime_request_timeout_s: float = 180.0
     maintenance_drain_file: str | None = None
 
     @classmethod
@@ -59,7 +59,7 @@ class GCProxySettings:
         expected_runtime_id = os.environ.get("III_GC_EXPECTED_RUNTIME_ID")
         expected_system_id = os.environ.get("III_GC_EXPECTED_SYSTEM_ID")
         runtime_request_timeout_s = float(
-            os.environ.get("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "30")
+            os.environ.get("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "180")
         )
         maintenance_drain_file = os.environ.get("III_GC_MAINTENANCE_DRAIN_FILE")
         if runtime_request_timeout_s <= 0:

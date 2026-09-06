@@ -512,8 +512,8 @@ Current Tkinter GUI functionality to preserve:
 
 ### 7.1 Authoritative Field Inspection Workflow
 
-The detailed and authoritative procedure is
-[`docs/field-inspection-operations.md`](../../../docs/field-inspection-operations.md).
+The detailed and authoritative procedure is the workspace
+[`field-inspection-operations.md`](https://github.com/DIII-SDU-Group/III-Drone-ros2-ws/blob/main/docs/field-inspection-operations.md).
 In real operation the safety pilot manually flies to the overview position and
 both pylons. The GUI starts PL mapper, presents fresh spatial and orthogonal
 vector geometry for visual approval, stores one powerline overview, and captures

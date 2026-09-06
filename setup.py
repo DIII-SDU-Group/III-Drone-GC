@@ -25,6 +25,7 @@ setup(
         'setuptools',
         'fastapi>=0.110,<1',
         'httpx>=0.27,<1',
+        'iii-drone-contracts>=0.1.0,<0.2',
         'pydantic>=2,<3',
         'uvicorn>=0.29,<1',
         'websockets>=12,<16',
@@ -42,6 +43,7 @@ setup(
         "console_scripts": [
             "gui = iii_drone_gc.gui:main",
             "iii-gc-proxy = iii_drone_gc.v2_proxy.main:main",
+            "iii-gc-companion = iii_drone_gc.v2_companion:main",
         ]
     }
 )

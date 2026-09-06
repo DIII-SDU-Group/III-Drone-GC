@@ -261,6 +261,8 @@ export function AppShell({
   );
 }
 
+// Shared with shell-level controls; a non-component export intentionally makes this a full-refresh boundary.
+// eslint-disable-next-line react-refresh/only-export-components
 export function currentPendingCommand(state: RuntimeStoreState): CommandResultMessage | undefined {
   const requestIds = new Set<string>();
   const controlTransition = state.domains.control?.latest?.transition;

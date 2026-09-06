@@ -39,7 +39,7 @@ export function ConfigurationPage({
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const stagedEdits = Object.values(staged);
   const writeDisabledReason = configurationWriteDisabledReason(state);
-  const downloadDisabledReason = state.connection.commands_disabled_reason ?? undefined;
+  const readDisabledReason = state.connection.commands_disabled_reason ?? undefined;
   const badges = configurationBadges(manifest, state, stagedEdits.length > 0);
   const rows = parameterRows(manifest);
   const filteredRows = filterParameterRows(rows, query, nodeFilter, groupFilter, mutabilityFilter);
@@ -70,7 +70,10 @@ export function ConfigurationPage({
     }
     const response = await run(
       "configuration.apply",
-      { edits: validEdits.map((edit) => parameterEditPayload(edit.parameter, edit.valueText)) },
+      {
+        edits: validEdits.map((edit) => parameterEditPayload(edit.parameter, edit.valueText)),
+        expected_revision: manifest.status?.tuning_revision ?? 0,
+      },
       `${validEdits.length} parameter edit${validEdits.length === 1 ? "" : "s"} applied`,
     );
     if (response?.accepted) {
@@ -135,6 +138,18 @@ export function ConfigurationPage({
             <dd>{manifest.status?.pending_restart ? "yes" : "no"}</dd>
           </div>
           <div>
+            <dt>Configuration revision</dt>
+            <dd>{manifest.status?.tuning_revision ?? 0}</dd>
+          </div>
+          <div>
+            <dt>Configuration consistency</dt>
+            <dd>{manifest.status?.configuration_divergent ? "divergent — writes blocked" : "consistent"}</dd>
+          </div>
+          <div>
+            <dt>GC revision mirror</dt>
+            <dd>{mirrorStatusLabel(manifest)}</dd>
+          </div>
+          <div>
             <dt>Unsaved</dt>
             <dd>{manifest.status?.unsaved || state.domains.configuration?.unsaved ? "yes" : "no"}</dd>
           </div>
@@ -145,9 +160,21 @@ export function ConfigurationPage({
         </dl>
         {manifest.status?.pending_restart ? (
           <div className="control-callout">
-            <strong>Only valid after system restart</strong>
-            <p>{(manifest.status.pending_constant_names ?? []).join(", ") || "Constant parameter changes are persisted."}</p>
+            <strong>Pending next cold restart</strong>
+            <p>{pendingBootSummary(manifest)}</p>
             <button type="button" onClick={onOpenRuntime}>Open Runtime</button>
+          </div>
+        ) : null}
+        {manifest.status?.configuration_divergent ? (
+          <div className="control-callout control-callout--danger" role="alert">
+            <strong>Configuration truth is divergent</strong>
+            <p>Further writes are blocked until the exact observed values are reconciled.</p>
+          </div>
+        ) : null}
+        {manifest.status?.mirror_state === "degraded" ? (
+          <div className="control-callout" role="status">
+            <strong>GC revision mirror degraded</strong>
+            <p>Tuning remains target-durable. Accepted revisions will backfill automatically when the GC host reconnects.</p>
           </div>
         ) : null}
         {state.domains.configuration?.degraded_reason ? <p className="control-reason">{state.domains.configuration.degraded_reason}</p> : null}
@@ -237,7 +264,7 @@ export function ConfigurationPage({
       <section className="workflow-section">
         <div className="workflow-section__heading">
           <h3>Snapshots</h3>
-          <DisabledControl reason={downloadDisabledReason}><button type="button" disabled={Boolean(downloadDisabledReason)} onClick={() => void run("configuration.snapshot.list", undefined, "Snapshot list refreshed")}>
+          <DisabledControl reason={readDisabledReason}><button type="button" disabled={Boolean(readDisabledReason)} onClick={() => void run("configuration.snapshot.list", undefined, "Snapshot list refreshed")}>
             Refresh list
           </button></DisabledControl>
         </div>
@@ -275,13 +302,10 @@ export function ConfigurationPage({
                   {snapshot.is_default ? <span>default</span> : null}
                 </div>
               </div>
-              <DisabledControl reason={downloadDisabledReason}><button
-                type="button"
-                disabled={Boolean(downloadDisabledReason)}
-                onClick={() => void run("configuration.snapshot.download", { snapshot_id: snapshot.snapshot_id }, `Snapshot ${snapshot.label} downloaded`)}
-              >
-                Download
-              </button></DisabledControl>
+              <div className="snapshot-capture-action">
+                <strong>Capture on GC host</strong>
+                <code>{captureCommand(manifest, snapshot)}</code>
+              </div>
               <PressAndHoldButton
                 label="Load"
                 disabledReason={writeDisabledReason}
@@ -300,6 +324,22 @@ export function ConfigurationPage({
       <ToastRegion toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </div>
   );
+}
+
+function mirrorStatusLabel(manifest: ConfigurationManifest): string {
+  const status = manifest.status;
+  if (status?.mirror_state === "current") {
+    return `current at revision ${status.mirror_ack_revision ?? status.tuning_revision ?? 0}`;
+  }
+  if (status?.mirror_state === "degraded") {
+    return `degraded; target at revision ${status.tuning_revision ?? 0}`;
+  }
+  return "not required until the first tuning capture";
+}
+
+function captureCommand(manifest: ConfigurationManifest, snapshot: SnapshotSummary): string {
+  const profile = manifest.status?.tuning_runtime_profile === "real" ? "real" : "sim";
+  return `iii config capture pull --target ${profile} --snapshot ${snapshot.snapshot_id} --name NAME --description DESCRIPTION`;
 }
 
 function configurationManifest(state: RuntimeStoreState): ConfigurationManifest {
@@ -358,6 +398,17 @@ function configurationBadges(
     badges.push("Non-default");
   }
   return badges;
+}
+
+function pendingBootSummary(manifest: ConfigurationManifest): string {
+  const values = manifest.status?.pending_boot_values ?? {};
+  const rows = parameterRows(manifest);
+  const details = Object.entries(values).map(([name, persisted]) => {
+    const parameter = rows.find((row) => row.parameter.name === name)?.parameter;
+    const active = parameter?.active_value ?? parameter?.current_value;
+    return `${name}: active ${String(active)} → next ${String(persisted)}`;
+  });
+  return details.join("; ") || (manifest.status?.pending_constant_names ?? []).join(", ") || "Restart-required values are durably persisted.";
 }
 
 type ParameterRow = { nodeLabel: string; groupLabel: string; parameter: ParameterDefinition };

@@ -2,7 +2,8 @@
 
 This is the signed acceptance record for operating the inspection mission on a
 real aircraft. The authoritative operator sequence is
-[`docs/field-inspection-operations.md`](../../../docs/field-inspection-operations.md).
+the workspace
+[`field-inspection-operations.md`](https://github.com/DIII-SDU-Group/III-Drone-ros2-ws/blob/main/docs/field-inspection-operations.md).
 Create one copy of this record per aircraft, software revision, configuration,
 site, and staged test. Simulation evidence does not authorize field flight.
 

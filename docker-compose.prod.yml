@@ -1,26 +1,33 @@
 services:
   proxy:
+    image: "iii-drone-gc-proxy:${III_GC_IMAGE_TAG:-workspace}"
     build:
       context: ../..
       dockerfile: src/III-Drone-GC/docker/proxy.Dockerfile
+      labels:
+        io.iii-drone.application-id: "${III_GC_APPLICATION_ID:-unbound}"
     network_mode: host
     environment:
       III_GC_PROXY_HOST: 127.0.0.1
       III_GC_PROXY_PORT: "${III_GC_PROXY_PORT:-8780}"
+      III_GC_RUNTIME_REQUEST_TIMEOUT_SEC: "${III_GC_RUNTIME_REQUEST_TIMEOUT_SEC:-180}"
       III_GC_PROXY_CORS_ORIGINS: ${III_GC_PROXY_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       III_GC_EXPECTED_RUNTIME_ID: ${III_GC_EXPECTED_RUNTIME_ID:-}
       III_GC_EXPECTED_SYSTEM_ID: ${III_GC_EXPECTED_SYSTEM_ID:-}
       III_GC_EXPECTED_PROFILE: ${III_GC_EXPECTED_PROFILE:-}
-    restart: unless-stopped
+    restart: "no"
 
   frontend:
+    image: "iii-drone-gc-frontend:${III_GC_IMAGE_TAG:-workspace}"
     build:
       context: ../..
       dockerfile: src/III-Drone-GC/frontend/Dockerfile
+      labels:
+        io.iii-drone.application-id: "${III_GC_APPLICATION_ID:-unbound}"
       args:
         VITE_GC_PROXY_URL: ${III_GC_PROXY_PUBLIC_URL:-http://localhost:8780}
     ports:
       - "127.0.0.1:${III_GC_FRONTEND_PORT:-5173}:80"
     depends_on:
       - proxy
-    restart: unless-stopped
+    restart: "no"

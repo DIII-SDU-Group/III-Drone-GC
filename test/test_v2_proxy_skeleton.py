@@ -93,6 +93,9 @@ def test_real_gc_profile_accepts_pinned_identity_and_explicit_cors(monkeypatch):
 
 
 def test_runtime_request_timeout_is_configurable_and_positive(monkeypatch):
+    monkeypatch.delenv("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", raising=False)
+    assert GCProxySettings.from_env().runtime_request_timeout_s == 180.0
+
     monkeypatch.setenv("III_GC_RUNTIME_REQUEST_TIMEOUT_SEC", "45")
     assert GCProxySettings.from_env().runtime_request_timeout_s == 45.0
 

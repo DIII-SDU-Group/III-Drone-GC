@@ -349,6 +349,8 @@ function isOperationActive(state: RuntimeStoreState): boolean {
   return Boolean(operation?.active_operation_id || operation?.latest?.operation_active === true);
 }
 
+// Shared by the global safety controls; a non-component export intentionally makes this a full-refresh boundary.
+// eslint-disable-next-line react-refresh/only-export-components
 export function operationCancelDisabledReason(state: RuntimeStoreState): string | undefined {
   if (state.connection.commands_disabled_reason) {
     return state.connection.commands_disabled_reason;

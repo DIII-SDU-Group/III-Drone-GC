@@ -34,6 +34,8 @@ from iii_drone_contracts.configuration_capture import (
 
 SCHEMA = "iii.gc-companion-state/v1"
 HOSTNAME = "iii.local"
+DISCOVERY_REQUEST_TIMEOUT_SECONDS = 5
+CONFIGURATION_REQUEST_TIMEOUT_SECONDS = 15
 DEFAULT_PORT = 8765
 ROLES = ("discovery", "clock", "mirror")
 SHA256 = re.compile(r"^[a-f0-9]{64}$")
@@ -207,6 +209,7 @@ class RuntimeClient:
         *,
         authenticated: bool,
         body: Mapping[str, Any] | None = None,
+        timeout_seconds: float = DISCOVERY_REQUEST_TIMEOUT_SECONDS,
     ) -> Any:
         if not path.startswith("/") or ".." in path:
             raise CompanionError("runtime API path is unsafe")
@@ -228,7 +231,7 @@ class RuntimeClient:
             headers=headers,
             method=method,
         )
-        with self.opener(request, timeout=5) as response:
+        with self.opener(request, timeout=timeout_seconds) as response:
             payload = response.read(8 * 1024 * 1024 + 1)
         if len(payload) > 8 * 1024 * 1024:
             raise CompanionError("runtime response exceeds the companion limit")
@@ -237,11 +240,35 @@ class RuntimeClient:
             raise CompanionError("runtime response is not a JSON object")
         return value
 
-    def _get(self, path: str, *, authenticated: bool) -> Any:
-        return self._request("GET", path, authenticated=authenticated)
+    def _get(
+        self,
+        path: str,
+        *,
+        authenticated: bool,
+        timeout_seconds: float = DISCOVERY_REQUEST_TIMEOUT_SECONDS,
+    ) -> Any:
+        return self._request(
+            "GET",
+            path,
+            authenticated=authenticated,
+            timeout_seconds=timeout_seconds,
+        )
 
-    def _post(self, path: str, body: Mapping[str, Any], *, authenticated: bool) -> Any:
-        return self._request("POST", path, authenticated=authenticated, body=body)
+    def _post(
+        self,
+        path: str,
+        body: Mapping[str, Any],
+        *,
+        authenticated: bool,
+        timeout_seconds: float = DISCOVERY_REQUEST_TIMEOUT_SECONDS,
+    ) -> Any:
+        return self._request(
+            "POST",
+            path,
+            authenticated=authenticated,
+            body=body,
+            timeout_seconds=timeout_seconds,
+        )
 
     def observe(self) -> RuntimeObservation:
         try:
@@ -272,7 +299,11 @@ class RuntimeClient:
             )
 
     def configuration_state(self) -> dict[str, Any]:
-        return self._get("/cli/configuration/state", authenticated=True)
+        return self._get(
+            "/cli/configuration/state",
+            authenticated=True,
+            timeout_seconds=CONFIGURATION_REQUEST_TIMEOUT_SECONDS,
+        )
 
     def configuration_journal(
         self,
@@ -290,7 +321,11 @@ class RuntimeClient:
                 **({"session_id": session_id} if session_id is not None else {}),
             }
         )
-        return self._get(f"/cli/configuration/journal?{query}", authenticated=True)
+        return self._get(
+            f"/cli/configuration/journal?{query}",
+            authenticated=True,
+            timeout_seconds=CONFIGURATION_REQUEST_TIMEOUT_SECONDS,
+        )
 
     def acknowledge_configuration_mirror(
         self, acknowledgement: Mapping[str, Any]
@@ -299,6 +334,7 @@ class RuntimeClient:
             "/cli/configuration/mirror/ack",
             acknowledgement,
             authenticated=True,
+            timeout_seconds=CONFIGURATION_REQUEST_TIMEOUT_SECONDS,
         )
 
 
@@ -417,18 +453,30 @@ class Companion:
             status = manifest["status"]
             current_session = status.get("tuning_session_id")
             profile = status.get("tuning_runtime_profile")
-            if profile != observation.profile:
+            # The configuration journal is keyed by the runtime profile.  HIL
+            # and opti_track may reuse sim/real parameter content, but their
+            # tuning-session identity remains the explicit runtime profile.
+            if observation.profile != profile:
                 raise CompanionError("configuration and runtime profiles differ")
             cursor = self._load_mirror_cursor()
             if (
                 cursor["session_id"] is not None
                 and cursor["session_id"] != current_session
             ):
-                cursor = self._mirror_session(profile, cursor["session_id"], cursor)
+                # A completed cursor already proves that the prior session was
+                # mirrored through its authoritative head.  Do not require the
+                # newly activated runtime to retain that historical session:
+                # release activation may legitimately expose only its current
+                # tuning session.  Incomplete cursors must still be backfilled
+                # before advancing to the new session.
                 if not cursor["complete"]:
-                    raise CompanionError(
-                        "prior configuration session backfill is incomplete"
+                    cursor = self._mirror_session(
+                        profile, cursor["session_id"], cursor
                     )
+                    if not cursor["complete"]:
+                        raise CompanionError(
+                            "prior configuration session backfill is incomplete"
+                        )
                 cursor = self._empty_cursor(current_session)
                 self._write_mirror_cursor(cursor)
             elif cursor["session_id"] is None and current_session is not None:
@@ -465,9 +513,20 @@ class Companion:
                 "checksum": cursor["checksum"],
                 "mirror_id": mirror_id,
             }
-            response = self.client.acknowledge_configuration_mirror(acknowledgement)
-            if response.get("acknowledged") is not True:
-                raise CompanionError("runtime rejected the configuration mirror head")
+            acknowledgement_is_current = (
+                status.get("mirror_state") == "current"
+                and status.get("mirror_ack_revision") == cursor["revision"]
+                and status.get("mirror_ack_sequence") == cursor["sequence"]
+                and status.get("mirror_ack_checksum") == cursor["checksum"]
+            )
+            if not acknowledgement_is_current:
+                response = self.client.acknowledge_configuration_mirror(
+                    acknowledgement
+                )
+                if response.get("acknowledged") is not True:
+                    raise CompanionError(
+                        "runtime rejected the configuration mirror head"
+                    )
             return self._commit(
                 "current",
                 observation,
@@ -492,6 +551,7 @@ class Companion:
                 observation,
                 mirrored=False,
                 error=type(exc).__name__,
+                error_detail=str(exc),
             )
 
     @staticmethod

@@ -54,7 +54,7 @@ class FakeClient:
             "session": {
                 "session_id": session_id,
                 "baseline_id": value["baseline_id"],
-                "target_id": "drone-1" if profile == "real" else "sim",
+                "target_id": "sim" if profile == "sim" else "drone-1",
                 "runtime_profile": profile,
                 "release_id": value["release_id"],
                 "workspace_id": "workspace-test",
@@ -207,6 +207,57 @@ def test_mirror_is_immutable_content_addressed_and_idempotent(tmp_path):
     assert len(client.acks) == 2
 
 
+def test_mirror_does_not_repeat_an_exact_current_acknowledgement(tmp_path):
+    observation = RuntimeObservation(True, "hil", "runtime", "system")
+    session_id = "a" * 64
+    session = _session(session_id, profile="hil")
+    head = session["entries"][-1]
+    client = FakeClient(
+        [observation],
+        sessions={session_id: session},
+        configuration={
+            "status": {},
+            "manifest": {
+                "status": {
+                    "tuning_session_id": session_id,
+                    "tuning_runtime_profile": "hil",
+                    "mirror_state": "current",
+                    "mirror_ack_revision": head["revision"],
+                    "mirror_ack_sequence": head["sequence"],
+                    "mirror_ack_checksum": head["checksum"],
+                }
+            },
+        },
+    )
+
+    result = _companion(
+        tmp_path, "mirror", [observation], client=client
+    ).run_once()
+
+    assert result["outcome"] == "current"
+    assert result["mirror_state"] == "current"
+    assert client.journal_calls == [(session_id, 0)]
+    assert client.acks == []
+
+
+def test_aircraft_alias_profiles_mirror_their_runtime_profile(tmp_path):
+    for runtime_profile in ("hil", "opti_track"):
+        observation = RuntimeObservation(True, runtime_profile, "runtime", "system")
+        session_id = ("a" if runtime_profile == "hil" else "b") * 64
+        sessions = {session_id: _session(session_id, profile=runtime_profile)}
+        client = FakeClient([observation], sessions=sessions)
+
+        result = _companion(
+            tmp_path / runtime_profile,
+            "mirror",
+            [observation],
+            client=client,
+        ).run_once()
+
+        assert result["outcome"] == "current"
+        assert client.journal_calls == [(session_id, 0)]
+
+
 def test_mirror_restart_resumes_cursor_without_duplicate_revisions(tmp_path):
     observation = RuntimeObservation(True, "real", "runtime", "system")
     first_client = FakeClient([observation])
@@ -327,7 +378,7 @@ def test_network_loss_between_batches_checkpoints_then_reconnect_backfills_gap(
     )
 
 
-def test_mirror_backfills_old_session_before_new_release_session(tmp_path):
+def test_mirror_skips_completed_old_session_after_new_release_session(tmp_path):
     observation = RuntimeObservation(True, "real", "runtime", "system")
     old_id, new_id = "a" * 64, "e" * 64
     sessions = {
@@ -345,7 +396,7 @@ def test_mirror_backfills_old_session_before_new_release_session(tmp_path):
     ).run_once()
 
     assert result["outcome"] == "current"
-    assert next_client.journal_calls == [(old_id, 2), (new_id, 0)]
+    assert next_client.journal_calls == [(new_id, 0)]
     assert (
         len(
             list(
@@ -356,6 +407,45 @@ def test_mirror_backfills_old_session_before_new_release_session(tmp_path):
         )
         == 2
     )
+
+
+def test_mirror_backfills_incomplete_old_session_before_new_session(tmp_path):
+    observation = RuntimeObservation(True, "real", "runtime", "system")
+    old_id, new_id = "a" * 64, "e" * 64
+    sessions = {
+        old_id: _session(old_id, release_id="b" * 64),
+        new_id: _session(new_id, release_id="f" * 64),
+    }
+    first_client = FakeClient([observation], sessions=sessions)
+    first_client.current_session = old_id
+    _companion(tmp_path, "mirror", [observation], client=first_client).run_once()
+
+    first_entry = sessions[old_id]["entries"][0]
+    cursor_path = tmp_path / "state/mirror-cursor.json"
+    cursor_path.write_text(
+        json.dumps(
+            {
+                "schema": "iii.gc-configuration-mirror-cursor/v1",
+                "session_id": old_id,
+                "sequence": 1,
+                "checksum": first_entry["checksum"],
+                "revision": first_entry["revision"],
+                "complete": False,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+
+    next_client = FakeClient([observation], sessions=sessions)
+    next_client.current_session = new_id
+    result = _companion(
+        tmp_path, "mirror", [observation], client=next_client
+    ).run_once()
+
+    assert result["outcome"] == "current"
+    assert next_client.journal_calls == [(old_id, 1), (new_id, 0)]
 
 
 def test_mirror_rejects_tampered_chain_and_keeps_target_authoritative(tmp_path):
@@ -464,3 +554,25 @@ def test_runtime_client_uses_cli_credential_for_mirror_routes(tmp_path):
     assert request.full_url == "http://iii.local:8765/cli/configuration/state"
     assert request.headers["X-iii-cli-token"] == "mirror-cli-token"
     assert "Authorization" not in request.headers
+    assert requests[0][1]["timeout"] == 15
+
+
+def test_runtime_client_keeps_discovery_timeout_short(tmp_path):
+    requests = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, _limit):
+            return b'{"profile":"hil","runtime_id":"r","system_id":"s"}'
+
+    def opener(request, **kwargs):
+        requests.append((request, kwargs))
+        return Response()
+
+    assert RuntimeClient(opener=opener).observe().reachable is True
+    assert requests[0][1]["timeout"] == 5

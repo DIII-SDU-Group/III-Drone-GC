@@ -73,6 +73,20 @@ function renderGate(client = createClient()) {
   return client;
 }
 
+async function selectDiscoveredRuntime() {
+  await screen.findByRole("option", {
+    name: "Sim Runtime - 10.0.0.2:8765 - aircraft-sim-1 [sim]",
+  });
+  fireEvent.change(screen.getByLabelText("Runtime endpoint"), {
+    target: { value: "runtime-1" },
+  });
+  await screen.findByText(
+    "Selected runtime: Sim Runtime / aircraft-sim-1 / sim",
+    {},
+    { timeout: 3000 },
+  );
+}
+
 describe("SessionGate", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -98,10 +112,7 @@ describe("SessionGate", () => {
   it("selects runtime endpoints only through the dropdown", async () => {
     const client = renderGate();
 
-    await screen.findByRole("option", { name: "Sim Runtime - 10.0.0.2:8765 - aircraft-sim-1 [sim]" });
-    fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
-      target: { value: "runtime-1" },
-    });
+    await selectDiscoveredRuntime();
 
     await waitFor(() => expect(client.selectTarget).toHaveBeenCalledWith("runtime-1"));
     expect(screen.queryByPlaceholderText("http://drone-host:8765")).not.toBeInTheDocument();
@@ -110,9 +121,7 @@ describe("SessionGate", () => {
   it("selects a runtime, logs in, stores the session, and opens the proxied WebSocket", async () => {
     const client = renderGate();
 
-    fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
-      target: { value: "runtime-1" },
-    });
+    await selectDiscoveredRuntime();
     await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
     fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
     fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
@@ -152,9 +161,7 @@ describe("SessionGate", () => {
   it("reopens the state WebSocket after a transient close while the session is valid", async () => {
     const client = renderGate();
 
-    fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
-      target: { value: "runtime-1" },
-    });
+    await selectDiscoveredRuntime();
     await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
     fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
     fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
@@ -176,9 +183,7 @@ describe("SessionGate", () => {
   it("logs out, releases the runtime session, clears storage, and closes the WebSocket", async () => {
     const client = renderGate();
 
-    fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
-      target: { value: "runtime-1" },
-    });
+    await selectDiscoveredRuntime();
     await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
     fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
     fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
@@ -207,9 +212,7 @@ describe("SessionGate", () => {
   it("requires positive aircraft identity confirmation before login", async () => {
     renderGate();
 
-    fireEvent.change(await screen.findByLabelText("Runtime endpoint"), {
-      target: { value: "runtime-1" },
-    });
+    await selectDiscoveredRuntime();
     await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
 
     expect(screen.getByRole("button", { name: "Login" })).toBeDisabled();

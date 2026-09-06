@@ -174,6 +174,17 @@ the workspace
 [`field-inspection-operations.md`](https://github.com/DIII-SDU-Group/III-Drone-ros2-ws/blob/main/docs/field-inspection-operations.md)
 uses manual RC/QGroundControl positioning and current-position GUI captures.
 
+Runtime lifecycle operations can legitimately take close to the proxy's
+180-second operation budget while ROS lifecycle nodes settle. The runner's
+per-request timeout therefore defaults to 190 seconds. A shorter
+`--http-timeout-s` is appropriate only for deliberately testing unknown-outcome
+recovery; it is not the field acceptance setting.
+
+The reversible configuration round trip retries only typed, explicitly
+retryable rejections for up to 60 seconds. This covers the brief ROS service
+rediscovery window after `runtime.start`; non-retryable validation or safety
+rejections still fail immediately.
+
 ## Fault Acceptance Matrix
 
 The complete cycle complements focused deterministic fault tests. Together they

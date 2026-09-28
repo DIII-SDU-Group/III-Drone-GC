@@ -23,7 +23,7 @@ function readyState(): RuntimeStoreState {
         battery_warning: 0,
         latest: {},
       },
-      control: { owner: "px4_hold", freshness: "fresh", source_availability: "available", latest: {} },
+      control: { owner: "px4_hold", freshness: "fresh", source_availability: "available", latest: { command_permissions: { "mission.activate": [] } } },
       mission: {
         active_spec_id: "inspection-production",
         mission_state: "ready",
@@ -86,7 +86,7 @@ function readyState(): RuntimeStoreState {
           source: "runtime fusion",
           recent_context: [],
         },
-        latest: {},
+        latest: { owned_mode: "inspection_demo" },
       },
       perception: { pl_mapper_state: "Running", freshness: "fresh", source_availability: "available", latest: { permissions: { mutating_commands_allowed: true, mutation_rejections: [] } } },
       powerline: {
@@ -298,4 +298,202 @@ describe("MissionPage", () => {
     expect(screen.getByText(/Use Hold or manual takeover/)).toBeInTheDocument();
     expect(screen.queryByText("Charging failure")).not.toBeInTheDocument();
   });
+
+  it("lists only compatible installed mission catalog entries from the runtime contract", async () => {
+    const dispatchCommand = vi.fn().mockResolvedValue({
+      request_id: "catalog-list-1",
+      command_id: "mission.catalog.list",
+      accepted: true,
+      message: "mission catalog entries returned",
+      result: {
+        catalog: {
+          schema: "iii.mission-catalog/v1",
+          active_profile: "hil",
+          entries: [
+            { id: "inspection-production", classification: "production", profiles: ["hil", "sim"], available: true },
+            { id: "inspection-development", classification: "experimental", profiles: ["hil"], available: true, experimental_warning: "EXPERIMENTAL mission: not qualified for production release or flight." },
+            { id: "simulation-only", classification: "production", profiles: ["sim"], available: false },
+          ],
+        },
+      },
+    });
+    render(<MissionPage state={readyState()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.catalog.list", { all: false });
+    expect(screen.getByRole("option", { name: "inspection-production (production)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "inspection-development (experimental)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "simulation-only (production)" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Pending mission selection"), { target: { value: "inspection-development" } });
+    expect(screen.getByText("EXPERIMENTAL mission: not qualified for production release or flight.")).toBeInTheDocument();
+  });
+
+  it("sends logical catalog ID and default selection payloads only after press-and-hold", async () => {
+    const dispatchCommand = vi.fn()
+      .mockResolvedValueOnce({
+        request_id: "catalog-list-2",
+        command_id: "mission.catalog.list",
+        accepted: true,
+        result: {
+          catalog: {
+            schema: "iii.mission-catalog/v1",
+            active_profile: "sim",
+            entries: [
+              { id: "inspection-production", classification: "production", profiles: ["sim"], available: true },
+              { id: "inspection-development", classification: "experimental", profiles: ["sim"], available: true },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({ request_id: "catalog-select-1", command_id: "mission.catalog.select", accepted: true, result: {} })
+      .mockResolvedValueOnce({ request_id: "catalog-select-2", command_id: "mission.catalog.select", accepted: true, result: {} });
+    render(<MissionPage state={readyState()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+    fireEvent.change(screen.getByLabelText("Pending mission selection"), { target: { value: "inspection-development" } });
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Apply selected mission" }));
+    act(() => vi.advanceTimersByTime(1500));
+    await act(async () => Promise.resolve());
+    expect(dispatchCommand).toHaveBeenNthCalledWith(2, "mission.catalog.select", { catalog_id: "inspection-development" });
+    expect(screen.getByText("Selection accepted. Active catalog remains the current mission status until the runtime reports it.")).toBeInTheDocument();
+    expect(screen.getAllByText("inspection-production", { selector: "dd" }).length).toBeGreaterThan(0);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Restore profile default" }));
+    act(() => vi.advanceTimersByTime(1500));
+    await act(async () => Promise.resolve());
+    expect(dispatchCommand).toHaveBeenNthCalledWith(3, "mission.catalog.select", { default: true });
+  });
+
+  it("reports a rejected catalog refresh without inventing selectable missions", async () => {
+    const dispatchCommand = vi.fn().mockResolvedValue({
+      request_id: "catalog-list-rejected",
+      command_id: "mission.catalog.list",
+      accepted: false,
+      message: "installed mission catalog is not initialized",
+    });
+    render(<MissionPage state={readyState()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getAllByText("installed mission catalog is not initialized").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Pending mission selection")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apply selected mission" })).toBeDisabled();
+  });
+
+  it("keeps catalog selection pending and reports a rejected selection", async () => {
+    const dispatchCommand = vi.fn()
+      .mockResolvedValueOnce({
+        request_id: "catalog-list-3",
+        command_id: "mission.catalog.list",
+        accepted: true,
+        result: {
+          catalog: {
+            schema: "iii.mission-catalog/v1",
+            active_profile: "sim",
+            entries: [
+              { id: "inspection-production", classification: "production", profiles: ["sim"], available: true },
+              { id: "inspection-development", classification: "experimental", profiles: ["sim"], available: true },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        request_id: "catalog-select-rejected",
+        command_id: "mission.catalog.select",
+        accepted: false,
+        message: "mission selection is not maintenance-safe: vehicle is not confirmed disarmed",
+      });
+    render(<MissionPage state={readyState()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+    fireEvent.change(screen.getByLabelText("Pending mission selection"), { target: { value: "inspection-development" } });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Apply selected mission" }));
+    act(() => vi.advanceTimersByTime(1500));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getAllByText("mission selection is not maintenance-safe: vehicle is not confirmed disarmed").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Pending mission selection")).toHaveValue("inspection-development");
+    expect(screen.getAllByText("inspection-production", { selector: "dd" }).length).toBeGreaterThan(0);
+  });
+
+  it("requires the non-simulation catalog safety gate for HIL and preserves simulation parity", async () => {
+    const hilState = readyState();
+    hilState.domains.mission!.specification = { ...hilState.domains.mission!.specification!, active_profile: "hil" };
+    hilState.domains.vehicle = { ...hilState.domains.vehicle!, nav_state: "mission", armed: true, in_air: true };
+    const catalogResponse = {
+      request_id: "catalog-list-4",
+      command_id: "mission.catalog.list",
+      accepted: true,
+      result: {
+        catalog: {
+          schema: "iii.mission-catalog/v1",
+          active_profile: "hil",
+          entries: [{ id: "inspection-production", classification: "production", profiles: ["hil"], available: true }],
+        },
+      },
+    };
+    const hilDispatch = vi.fn().mockResolvedValue(catalogResponse);
+    const hil = render(<MissionPage state={hilState} dispatchCommand={hilDispatch} />);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getByRole("button", { name: "Apply selected mission" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restore profile default" })).toBeDisabled();
+    expect(screen.getAllByText("Vehicle is not confirmed disarmed.").length).toBeGreaterThan(0);
+
+    hil.unmount();
+    const simDispatch = vi.fn().mockResolvedValue({
+      ...catalogResponse,
+      result: {
+        catalog: {
+          ...catalogResponse.result.catalog,
+          active_profile: "sim",
+          entries: [{ id: "inspection-production", classification: "production", profiles: ["sim"], available: true }],
+        },
+      },
+    });
+    render(<MissionPage state={readyState()} dispatchCommand={simDispatch} />);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getByRole("button", { name: "Apply selected mission" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Restore profile default" })).toBeEnabled();
+  });
+  it("starts the active catalog's reported root instead of a hard-coded inspection mode", () => {
+    const state = readyState();
+    state.domains.mission!.latest = { owned_mode: "reach_cable" };
+    state.domains.mission!.modes = [{ mode_key: "reach_cable", display_name: "Reach Cable", mode_id: 24, registered: true, active: false, tree_running: false, tree_finished: false, freshness: "fresh" }];
+    state.domains.mission!.inspection_start_eligibility = undefined;
+    const dispatchCommand = vi.fn().mockResolvedValue({ accepted: true });
+    render(<MissionPage state={state} dispatchCommand={dispatchCommand} />);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Start Reach Cable" }));
+    act(() => vi.advanceTimersByTime(1500));
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.activate", { mode_key: "reach_cable" });
+  });
+
+  it("requires reported ownership and fresh onboard activation permissions", () => {
+    const state = readyState();
+    state.domains.mission!.latest = {};
+    const { rerender } = render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Start Mission" })).toBeDisabled();
+    state.domains.mission!.latest = { owned_mode: "inspection_demo" };
+    state.domains.control!.latest = {};
+    rerender(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Start Inspection" })).toBeDisabled();
+  });
+
+  it("keeps a selected mission blocked by an onboard activation rejection", () => {
+    const state = readyState();
+    state.domains.control!.latest = { command_permissions: { "mission.activate": ["PX4 mode is not selectable"] } };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Start Inspection" })).toBeDisabled();
+    expect(screen.getAllByText("PX4 mode is not selectable").length).toBeGreaterThan(0);
+  });
+
 });

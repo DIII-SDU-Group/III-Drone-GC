@@ -56,7 +56,8 @@ command from any working directory:
 ```
 
 The same command supports `status`, `logs`, `restart`/`recover`, and `stop`.
-Stop and recovery capture Compose logs under `runtime_logs/ground-control/`.
+Stop and recovery capture Compose logs under
+`${XDG_STATE_HOME:-~/.local/state}/iii/ground-control/` by default.
 The onboard `iii-runtime-api.service` is independently supervised and remains
 reachable when managed aircraft nodes are stopped from the Runtime page.
 

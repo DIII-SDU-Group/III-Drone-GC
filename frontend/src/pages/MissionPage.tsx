@@ -4,7 +4,7 @@ import type { RuntimeCommandDispatcher } from "../api/commands";
 import { MapView } from "../components/MapView";
 import { PressAndHoldButton, ToastRegion, type CommandResult, type ToastMessage } from "../components";
 import type { CommandResponse, InspectionPreflightItem, MapState } from "../generated/contracts";
-import { profileSurfaceUnavailableReason, runtimeProfile, type RuntimeStoreState } from "../state";
+import { profileCapabilities, profileSurfaceUnavailableReason, runtimeProfile, type RuntimeStoreState } from "../state";
 
 const APPROVAL_KEY = "iii-drone:inspection:perception-approved-at";
 const PREPARATION_SNAPSHOT_KEY = "iii-drone:inspection:preparation-at-activation";
@@ -47,8 +47,13 @@ export function MissionPage({
   const spec = mission?.specification;
   const ownedModeKey = typeof mission?.latest?.owned_mode === "string" ? mission.latest.owned_mode : undefined;
   const ownedMode = mission?.modes?.find((mode) => mode.mode_key === ownedModeKey);
-  const startLabel = ownedModeKey === "inspection_demo" ? "Start Inspection" : `Start ${ownedMode?.display_name ?? "Mission"}`;
   const startReason = missionStartDisabledReason(state, ownedModeKey);
+  // A mission the runtime lets start from a disarmed, landed aircraft arms it.
+  const startArms =
+    !startReason && profileCapabilities(state)?.disarmed_mission_activation === true && vehicle?.armed === false && vehicle?.in_air === false;
+  const startLabel = startArms
+    ? `Arm and start ${ownedMode?.display_name ?? "Mission"}`
+    : ownedModeKey === "inspection_demo" ? "Start Inspection" : `Start ${ownedMode?.display_name ?? "Mission"}`;
   const phaseDetail = missionPhaseDetail(mission);
   const trajectory = mapState?.trajectory;
   const activeIntents = mission?.intents?.filter((intent) => intent.lifecycle !== "cleared") ?? [];
@@ -374,6 +379,12 @@ function missionStartDisabledReason(state: RuntimeStoreState, ownedModeKey: stri
   // roots, and every root of a profile without overviews, use their live
   // onboard activation and overview rejections.
   if (ownedModeKey !== "inspection_demo" || profileSurfaceUnavailableReason(state, "overviews")) {
+    // Where a mission mode may arm the aircraft itself (opti_track), the
+    // runtime's activation permissions and preflight decide the start.
+    if (profileCapabilities(state)?.disarmed_mission_activation === true) {
+      const failedPreflight = failedHardPreflight(mission);
+      return failedPreflight.length ? failedPreflight.map((item) => `${item.label}: ${item.detail ?? "not ready"}`).join("; ") : undefined;
+    }
     if (state.domains.vehicle?.armed !== true || state.domains.vehicle?.in_air !== true) return "Aircraft must be armed and airborne; position it with RC or QGroundControl.";
     return undefined;
   }

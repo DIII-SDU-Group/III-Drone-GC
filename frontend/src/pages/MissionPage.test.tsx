@@ -123,6 +123,19 @@ function readyState(): RuntimeStoreState {
   };
 }
 
+function optiTrackOnGround(): RuntimeStoreState {
+  const state = readyState();
+  state.domains.system!.capabilities = { profile: "opti_track", overviews_available: false, disarmed_mission_activation: true };
+  state.domains.vehicle = { ...state.domains.vehicle, armed: false, in_air: false, nav_state: "position" };
+  state.domains.mission!.latest = { owned_mode: "ot_cycle_takeoff" };
+  state.domains.mission!.modes = [{ mode_key: "ot_cycle_takeoff", display_name: "OT Takeoff", mode_id: 30, registered: true, active: false, tree_running: false, tree_finished: false, freshness: "fresh" }];
+  state.domains.mission!.preflight = {
+    ready: true,
+    items: [{ key: "ready_to_arm", label: "Aircraft ready to arm", passed: true, hard_gate: true, source: "PX4 fused safety state", detail: "disarmed and landed; PX4 arming checks passed" }],
+  };
+  return state;
+}
+
 describe("MissionPage", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -552,6 +565,54 @@ describe("MissionPage", () => {
     }));
     view.rerender(<MissionPage state={{ ...state }} dispatchCommand={dispatchCommand} />);
     expect(screen.queryByRole("button", { name: "Proceed" })).not.toBeInTheDocument();
+  });
+
+  it("arms and starts an OptiTrack mission from the ground when the runtime allows it", () => {
+    const state = optiTrackOnGround();
+    const dispatchCommand = vi.fn().mockResolvedValue({ accepted: true, request_id: "start-1", command_id: "mission.activate" });
+    render(<MissionPage state={state} dispatchCommand={dispatchCommand} />);
+
+    const start = screen.getByRole("button", { name: "Arm and start OT Takeoff" });
+    expect(start).toBeEnabled();
+    fireEvent.pointerDown(start);
+    act(() => vi.advanceTimersByTime(1500));
+
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.activate", { mode_key: "ot_cycle_takeoff" });
+  });
+
+  it("keeps the runtime's reason when an OptiTrack mode must start airborne", () => {
+    const state = optiTrackOnGround();
+    state.domains.control!.latest = {
+      command_permissions: { "mission.activate": ["mission activation requires the vehicle to be armed", "mission activation requires the vehicle to be in flight"] },
+    };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    const start = screen.getByRole("button", { name: "Start OT Takeoff" });
+    expect(start).toBeDisabled();
+    expect(start).toHaveAccessibleDescription("mission activation requires the vehicle to be armed");
+  });
+
+  it("blocks an OptiTrack ground start on a failed onboard preflight item", () => {
+    const state = optiTrackOnGround();
+    state.domains.mission!.preflight = {
+      ready: false,
+      items: [{ key: "ready_to_arm", label: "Aircraft ready to arm", passed: false, hard_gate: true, source: "PX4 fused safety state", detail: "PX4 arming checks have not passed" }],
+    };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start OT Takeoff" })).toHaveAccessibleDescription(
+      "Aircraft ready to arm: PX4 arming checks have not passed",
+    );
+  });
+
+  it("still requires an armed, airborne aircraft where missions cannot arm it", () => {
+    const state = optiTrackOnGround();
+    state.domains.system!.capabilities = { profile: "real", disarmed_mission_activation: false };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start OT Takeoff" })).toHaveAccessibleDescription(
+      "Aircraft must be armed and airborne; position it with RC or QGroundControl.",
+    );
   });
 
   it("starts the aircraft system with the runtime's own profile", () => {

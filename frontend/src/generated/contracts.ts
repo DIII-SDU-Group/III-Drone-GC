@@ -540,6 +540,7 @@ export interface ProfileCapabilities {
   cable_intents_available?: boolean;
   simulation_available?: boolean;
   custom_operations?: Array<string> | null;
+  disarmed_mission_activation?: boolean;
 }
 
 export interface ProjectionPlane {

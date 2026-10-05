@@ -60,7 +60,6 @@ export function SessionGate({
   const [selectedRuntime, setSelectedRuntime] = useState<RuntimeEndpointSummary | null>(null);
   const [session, setSession] = useState<StoredSession | null>(() => loadStoredSession());
   const [sessionMetadata, setSessionMetadata] = useState<SessionResponse | null>(null);
-  const [password, setPassword] = useState("");
   const [identityConfirmed, setIdentityConfirmed] = useState(false);
   const [status, setStatus] = useState<ConnectionStatus>(session ? "restoring" : "prelogin");
   const [error, setError] = useState<string | null>(null);
@@ -191,16 +190,16 @@ export function SessionGate({
   async function login(event: FormEvent) {
     event.preventDefault();
     if (!selectedRuntime) {
-      setError("Select a runtime before login.");
+      setError("Select a runtime before connecting.");
       return;
     }
     if (!identityConfirmed) {
-      setError("Confirm the aircraft identity before login.");
+      setError("Confirm the aircraft identity before connecting.");
       return;
     }
     setError(null);
     try {
-      const loginResponse = await proxyClient.login(password, CLIENT_LABEL);
+      const loginResponse = await proxyClient.login(CLIENT_LABEL);
       const stored = {
         token: loginResponse.session_token,
         endpointId: selectedRuntime.endpoint_id,
@@ -212,7 +211,6 @@ export function SessionGate({
       saveStoredSession(stored);
       saveLastEndpoint(selectedRuntime.endpoint_id);
       setSession(stored);
-      setPassword("");
       setStatus("authenticated");
     } catch (reason) {
       setError(readableError(reason));
@@ -327,26 +325,15 @@ export function SessionGate({
               I confirm this is the intended aircraft and profile
             </label>
           </fieldset>
-          <label htmlFor="runtime-password">Operator password</label>
-          <div>
-            <input
-              id="runtime-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              disabled={!selectedRuntime || !identityConfirmed || status === "authenticated"}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-            <button type="submit" disabled={!selectedRuntime || !identityConfirmed || status === "authenticated"}>
-              Login
-            </button>
-          </div>
+          <button type="submit" disabled={!selectedRuntime || !identityConfirmed || status === "authenticated"}>
+            Connect
+          </button>
         </form>
 
         <p className="selected-runtime">
           {selectedRuntime
             ? `Selected runtime: ${selectedRuntime.runtime_name} / ${selectedRuntime.system_id ?? "unknown aircraft"} / ${selectedRuntime.profile ?? "unknown profile"}`
-            : "Select a runtime before login."}
+            : "Select a runtime before connecting."}
         </p>
       </div>
     </section>

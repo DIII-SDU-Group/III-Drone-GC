@@ -72,7 +72,7 @@ safety justification.
 ### Connect And Preflight
 
 - [ ] Operator confirms the prominent aircraft ID, runtime ID, and real profile
-  before login; a mismatched identity is rejected.
+  before connecting; a mismatched identity is rejected.
 - [ ] Dashboard, Mission, Flight, Payload, Perception, Map, Configuration,
   Rosbags, and Logs show fresh typed state or an explicit unavailable reason.
 - [ ] Dangerous runtime mutations blocked while armed/in-flight/unknown are

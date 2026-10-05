@@ -597,7 +597,7 @@ def test_explicit_localhost_mirror_accepts_only_simulation_profile(tmp_path):
     assert rejected["error"] == "LocalhostProfileMismatch"
 
 
-def test_mirror_never_claims_success_without_credential_or_runtime(tmp_path):
+def test_mirror_never_claims_success_without_runtime(tmp_path):
     companion = _companion(
         tmp_path,
         "mirror",
@@ -627,17 +627,14 @@ def test_runtime_client_is_hard_bound_to_iii_local(tmp_path):
         requests.append((request, kwargs))
         return Response()
 
-    client = RuntimeClient(port=9876, token_path=tmp_path / "unused", opener=opener)
+    client = RuntimeClient(port=9876, opener=opener)
 
     assert client.observe().profile == "sim"
     assert requests[0][0].full_url == "http://iii.local:9876/identity"
 
 
-def test_runtime_client_uses_cli_credential_for_mirror_routes(tmp_path):
+def test_runtime_client_reads_mirror_state_from_the_cli_route():
     requests = []
-    credential = tmp_path / "runtime-api.token"
-    credential.write_text("mirror-cli-token\n")
-    credential.chmod(0o600)
 
     class Response:
         def __enter__(self):
@@ -653,13 +650,12 @@ def test_runtime_client_uses_cli_credential_for_mirror_routes(tmp_path):
         requests.append((request, kwargs))
         return Response()
 
-    client = RuntimeClient(token_path=credential, opener=opener)
+    client = RuntimeClient(opener=opener)
 
     client.configuration_state()
 
     request = requests[0][0]
     assert request.full_url == "http://iii.local:8765/cli/configuration/state"
-    assert request.headers["X-iii-cli-token"] == "mirror-cli-token"
     assert "Authorization" not in request.headers
     assert requests[0][1]["timeout"] == 15
 

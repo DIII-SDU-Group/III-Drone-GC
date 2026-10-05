@@ -141,23 +141,6 @@ def _immutable_json(path: Path, value: Mapping[str, Any]) -> None:
             os.close(descriptor)
 
 
-def _load_token(path: Path | None) -> str | None:
-    if path is None or (not path.exists() and not path.is_symlink()):
-        return None
-    resolved = path.expanduser().absolute()
-    if path.is_symlink() or resolved.is_symlink() or not resolved.is_file():
-        raise CompanionError("runtime credential must be a real regular file")
-    metadata = resolved.stat(follow_symlinks=False)
-    if hasattr(os, "geteuid") and metadata.st_uid != os.geteuid():
-        raise CompanionError("runtime credential must be owned by this user")
-    if stat.S_IMODE(metadata.st_mode) & 0o077:
-        raise CompanionError("runtime credential permissions must be owner-only")
-    token = resolved.read_text(encoding="utf-8").strip()
-    if not token or any(character.isspace() for character in token):
-        raise CompanionError("runtime credential is empty or malformed")
-    return token
-
-
 @dataclass(frozen=True)
 class RuntimeObservation:
     reachable: bool
@@ -185,22 +168,14 @@ class RuntimeClient:
         self,
         *,
         port: int = DEFAULT_PORT,
-        token_path: Path | None = None,
-        token: str | None = None,
         hostname: str = HOSTNAME,
         opener: Callable[..., Any] = urlopen,
     ) -> None:
         if not 1 <= port <= 65535:
             raise CompanionError("runtime port is outside the TCP range")
         self.port = port
-        self.token_path = token_path
         if hostname not in {HOSTNAME, "localhost"}:
             raise CompanionError("runtime hostname is outside the fixed target set")
-        if token is not None and (
-            not token or any(character.isspace() for character in token)
-        ):
-            raise CompanionError("runtime token is malformed")
-        self.token = token
         self.hostname = hostname
         self.opener = opener
 
@@ -209,20 +184,12 @@ class RuntimeClient:
         method: str,
         path: str,
         *,
-        authenticated: bool,
         body: Mapping[str, Any] | None = None,
         timeout_seconds: float = DISCOVERY_REQUEST_TIMEOUT_SECONDS,
     ) -> Any:
         if not path.startswith("/") or ".." in path:
             raise CompanionError("runtime API path is unsafe")
         headers = {"Accept": "application/json"}
-        if authenticated:
-            token = _load_token(self.token_path)
-            if token is None:
-                token = self.token
-            if token is None:
-                raise CompanionError("runtime credential is not enrolled")
-            headers["X-III-CLI-Token"] = token
         data = None
         if body is not None:
             data = _canonical(body)
@@ -246,35 +213,22 @@ class RuntimeClient:
         self,
         path: str,
         *,
-        authenticated: bool,
         timeout_seconds: float = DISCOVERY_REQUEST_TIMEOUT_SECONDS,
     ) -> Any:
-        return self._request(
-            "GET",
-            path,
-            authenticated=authenticated,
-            timeout_seconds=timeout_seconds,
-        )
+        return self._request("GET", path, timeout_seconds=timeout_seconds)
 
     def _post(
         self,
         path: str,
         body: Mapping[str, Any],
         *,
-        authenticated: bool,
         timeout_seconds: float = DISCOVERY_REQUEST_TIMEOUT_SECONDS,
     ) -> Any:
-        return self._request(
-            "POST",
-            path,
-            authenticated=authenticated,
-            body=body,
-            timeout_seconds=timeout_seconds,
-        )
+        return self._request("POST", path, body=body, timeout_seconds=timeout_seconds)
 
     def observe(self) -> RuntimeObservation:
         try:
-            value = self._get("/identity", authenticated=False)
+            value = self._get("/identity")
             identity = value.get("identity", value)
             if not isinstance(identity, dict):
                 raise CompanionError("runtime identity payload is malformed")
@@ -308,14 +262,13 @@ class RuntimeClient:
     def clock_status(self) -> dict[str, Any] | None:
         """The aircraft's chrony settledness, or None if it cannot report it."""
         try:
-            return self._get("/clock/status", authenticated=False)
+            return self._get("/clock/status")
         except (CompanionError, HTTPError, URLError, OSError, ValueError):
             return None
 
     def configuration_state(self) -> dict[str, Any]:
         return self._get(
             "/cli/configuration/state",
-            authenticated=True,
             timeout_seconds=CONFIGURATION_REQUEST_TIMEOUT_SECONDS,
         )
 
@@ -337,7 +290,6 @@ class RuntimeClient:
         )
         return self._get(
             f"/cli/configuration/journal?{query}",
-            authenticated=True,
             timeout_seconds=CONFIGURATION_REQUEST_TIMEOUT_SECONDS,
         )
 
@@ -347,7 +299,6 @@ class RuntimeClient:
         return self._post(
             "/cli/configuration/mirror/ack",
             acknowledgement,
-            authenticated=True,
             timeout_seconds=CONFIGURATION_REQUEST_TIMEOUT_SECONDS,
         )
 
@@ -706,7 +657,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-root", type=Path)
     parser.add_argument("--registry-root", type=Path)
     parser.add_argument("--operations-root", type=Path)
-    parser.add_argument("--credential", type=Path)
     return parser
 
 
@@ -723,23 +673,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     workspace = Path(os.environ.get("WORKSPACE_DIR", str(Path.home())))
     operations_root = args.operations_root or workspace / ".iii/operations"
-    credential = args.credential or Path(
-        os.environ.get(
-            "III_RUNTIME_API_TOKEN_FILE",
-            str(Path.home() / ".config/iii/credentials/runtime-api.token"),
-        )
-    )
     companion = Companion(
         role=args.role,
         state_root=state_root,
         registry_root=registry_root,
         operations_root=operations_root,
-        client=RuntimeClient(
-            port=args.port,
-            token_path=credential,
-            token=os.environ.get("III_RUNTIME_API_CLI_TOKEN"),
-            hostname=args.runtime_host,
-        ),
+        client=RuntimeClient(port=args.port, hostname=args.runtime_host),
     )
     stop = threading.Event()
 

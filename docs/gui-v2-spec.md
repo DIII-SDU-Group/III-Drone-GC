@@ -4,8 +4,8 @@ Status: Implemented baseline; field acceptance remains stage-gated.
 
 Access control: the authentication, single-session, heartbeat-lease, CLI-token
 and TLS design recorded in this spec is not implemented. GUI v2 runs with
-unrestricted developer access (see `gui-v2-security-checklist.md`): the login
-step accepts any password and every client receives the fixed session token
+unrestricted developer access (see `gui-v2-security-checklist.md`): the GUI
+connects without a password and every client receives the fixed session token
 `developer-access`, the runtime API enforces no single session, lease, or
 GUI/CLI session conflict, and remote CLI calls need no token. Flight-safety
 command gating is enforced, and the GC proxy pins the expected runtime identity
@@ -333,7 +333,7 @@ Recommended architecture:
   - runtime booted.
   - system started/active.
 - `iii-runtime-api` owns command gating. It does not authenticate browser or
-  remote CLI clients: the login step accepts any password and issues the fixed
+  remote CLI clients: the login step takes no password and issues the fixed
   token `developer-access`, and remote CLI calls need no token.
 - Remote CLI operations must still respect runtime API safety rules. There is
   no GUI/CLI session conflict policy while access is unrestricted.
@@ -738,7 +738,7 @@ Configuration UI model:
 
 ### 8.2 Operator Session Authority
 
-Not implemented. The runtime accepts any login password, issues the fixed
+Not implemented. The runtime takes no login password, issues the fixed
 session token `developer-access` to every client, and enforces no single
 session, heartbeat lease, or expiry (see the access-control note at the top).
 The rules below record the original design.
@@ -920,11 +920,10 @@ Disconnected frontend behavior:
 
 Runtime API discovery:
 
-- Before login, the frontend discovers available `iii-runtime-api`
+- Before connecting, the frontend discovers available `iii-runtime-api`
   instances on the local/operator network.
 - The operator selects one detected runtime API instance.
-- The login step then opens a session on the selected runtime API (any
-  password is accepted).
+- Connecting then opens a session on the selected runtime API (no password).
 - The selected runtime API endpoint remains visible in the UI.
 - This lays groundwork for future multi-drone operation, but v2 controls only
   one selected runtime API/drone at a time.
@@ -1159,7 +1158,7 @@ Simulation acceptance:
 
 - Start GC frontend/proxy stack on the development computer.
 - Discover local sim `iii-runtime-api` through mDNS or manual fallback.
-- Complete the login step (any password is accepted).
+- Connect to the selected runtime (no password).
 - Boot/start III runtime through GUI Runtime page.
 - Observe dashboard status and health update.
 - Observe fused PX4 status once PX4/Gazebo is available.

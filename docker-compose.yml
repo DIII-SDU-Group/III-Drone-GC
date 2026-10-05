@@ -7,7 +7,6 @@ services:
     command: iii-gc-companion --role mirror --runtime-host localhost --state-root /workspace/.iii/operations/.mirror-state --interval 2
     environment:
       WORKSPACE_DIR: /workspace
-      III_RUNTIME_API_CLI_TOKEN: ${III_RUNTIME_API_CLI_TOKEN:-dev-cli-token}
     volumes:
       - ${WORKSPACE_DIR:-../..}/.iii:/workspace/.iii
     restart: unless-stopped

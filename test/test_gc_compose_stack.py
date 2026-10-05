@@ -25,7 +25,6 @@ def test_gc_compose_stacks_define_frontend_and_proxy_services():
         assert "mirror:" in compose
         assert "iii-gc-companion --role mirror --runtime-host localhost" in compose
         assert "/workspace/.iii/operations/.mirror-state" in compose
-        assert "III_RUNTIME_API_CLI_TOKEN" in compose
 
 
 def test_gc_container_definitions_do_not_install_ros_packages():

@@ -550,6 +550,7 @@ code {
 
 .login-form button {
   min-width: 108px;
+  justify-self: end;
   background: #17202a;
   color: #ffffff;
 }

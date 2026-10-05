@@ -143,7 +143,7 @@ def test_proxy_passes_session_authority_through_and_tracks_connection_state_only
     http_proxy = _FakeHttpProxyClient()
     client, manager = _client(select=True, http_proxy=http_proxy)
 
-    login = client.post("/proxy/session/login", json={"password": "secret"})
+    login = client.post("/proxy/session/login", json={"client_label": "pytest"})
     connected = client.get("/runtime/target").json()
     logout = client.post("/proxy/session/logout")
     disconnected = client.get("/runtime/target").json()

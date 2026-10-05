@@ -118,16 +118,16 @@ describe("SessionGate", () => {
     expect(screen.queryByPlaceholderText("http://drone-host:8765")).not.toBeInTheDocument();
   });
 
-  it("selects a runtime, logs in, stores the session, and opens the proxied WebSocket", async () => {
+  it("selects a runtime, connects without a password, stores the session, and opens the proxied WebSocket", async () => {
     const client = renderGate();
 
     await selectDiscoveredRuntime();
     await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
     fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
-    fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
-    fireEvent.submit(screen.getByLabelText("Operator password").closest("form") as HTMLFormElement);
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    await waitFor(() => expect(client.login).toHaveBeenCalledWith("secret", "iii-gc-v2-browser"));
+    await waitFor(() => expect(client.login).toHaveBeenCalledWith("iii-gc-v2-browser"));
+    expect(screen.queryByLabelText("Operator password")).not.toBeInTheDocument();
     expect(window.sessionStorage.getItem("iii-gc-v2-session")).toContain("session-token");
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(FakeWebSocket.instances[0].url).toBe("ws://localhost:8780/proxy/ws/ws?token=session-token");
@@ -164,8 +164,7 @@ describe("SessionGate", () => {
     await selectDiscoveredRuntime();
     await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
     fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
-    fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
-    fireEvent.submit(screen.getByLabelText("Operator password").closest("form") as HTMLFormElement);
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
 
     vi.useFakeTimers();
@@ -186,8 +185,7 @@ describe("SessionGate", () => {
     await selectDiscoveredRuntime();
     await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
     fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
-    fireEvent.change(screen.getByLabelText("Operator password"), { target: { value: "secret" } });
-    fireEvent.submit(screen.getByLabelText("Operator password").closest("form") as HTMLFormElement);
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     await screen.findByLabelText("Runtime session");
 
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
@@ -209,15 +207,15 @@ describe("SessionGate", () => {
     expect(await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 })).toBeInTheDocument();
   });
 
-  it("requires positive aircraft identity confirmation before login", async () => {
+  it("requires positive aircraft identity confirmation before connecting", async () => {
     renderGate();
 
     await selectDiscoveredRuntime();
     await screen.findByText("Selected runtime: Sim Runtime / aircraft-sim-1 / sim", {}, { timeout: 3000 });
 
-    expect(screen.getByRole("button", { name: "Login" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
     fireEvent.click(screen.getByLabelText("I confirm this is the intended aircraft and profile"));
-    expect(screen.getByRole("button", { name: "Login" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled();
     expect(screen.getByText("aircraft-sim-1")).toBeInTheDocument();
   });
 });

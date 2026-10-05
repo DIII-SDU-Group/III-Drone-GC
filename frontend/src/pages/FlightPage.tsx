@@ -8,7 +8,8 @@ import {
   type ToastMessage,
 } from "../components";
 import type { RuntimeCommandDispatcher } from "../api/commands";
-import type { CommandResponse } from "../generated/contracts";
+import { externalVisionRows } from "../format/externalVision";
+import type { CommandResponse, ExternalVisionState } from "../generated/contracts";
 import type { RuntimeStoreState } from "../state";
 
 const FLIGHT_COMMANDS = {
@@ -118,6 +119,8 @@ export function FlightPage({
           </div>
         </dl>
       </section>
+
+      {state.domains.vehicle?.external_vision ? <ExternalVision vision={state.domains.vehicle.external_vision} /> : null}
 
       <section className="workflow-section source-drilldown">
         <h3>MAVSDK and ROS/uXRCE Sources</h3>
@@ -290,6 +293,23 @@ function systemRunningReasons(state: RuntimeStoreState): string[] {
     return [];
   }
   return ["system is not running"];
+}
+
+function ExternalVision({ vision }: { vision: ExternalVisionState }) {
+  return (
+    <section className="workflow-section" aria-label="External vision">
+      <div className="workflow-section__heading"><h3>External Vision</h3><span>{vision.ready ? "ready" : "not ready"}</span></div>
+      <dl className="status-list">
+        {externalVisionRows(vision).map((row) => (
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {vision.degraded_reason ? <p className="control-reason">{vision.degraded_reason}</p> : null}
+    </section>
+  );
 }
 
 function SourceBlock({ title, value }: { title: string; value: unknown }) {

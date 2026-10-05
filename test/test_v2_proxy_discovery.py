@@ -241,13 +241,13 @@ def test_real_mdns_discovery_invokes_fixed_clock_sync_once_until_disappearance()
     assert len(calls) == 1
     assert calls[0][0] == [
         "iii",
-        "system",
+        "host",
         "clock",
         "sync",
-        "--target",
-        "real",
         "--profile",
         "real",
+        "--host",
+        "iii.local",
         "--confirm",
         "--non-interactive",
         "--json",
@@ -255,7 +255,45 @@ def test_real_mdns_discovery_invokes_fixed_clock_sync_once_until_disappearance()
     assert calls[0][1]["timeout"] == 45
 
 
-def test_sim_and_manual_discovery_never_invoke_clock_sync():
+def test_opti_track_mdns_discovery_also_invokes_clock_sync_for_its_profile():
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    endpoint = RuntimeEndpointSummary(
+        endpoint_id="runtime-opti-track",
+        source="mdns",
+        runtime_name="OptiTrack Runtime",
+        base_url="http://192.168.1.20:8765",
+        address="192.168.1.20",
+        port=8765,
+        profile="opti_track",
+        reachable=True,
+    )
+    companion = ReceiverClockSyncCompanion(executor=ImmediateExecutor(), runner=runner)
+
+    companion.discovered([endpoint])
+
+    assert calls == [
+        [
+            "iii",
+            "host",
+            "clock",
+            "sync",
+            "--profile",
+            "opti_track",
+            "--host",
+            "iii.local",
+            "--confirm",
+            "--non-interactive",
+            "--json",
+        ]
+    ]
+
+
+def test_sim_hil_and_manual_discovery_never_invoke_clock_sync():
     calls = []
     companion = ReceiverClockSyncCompanion(
         executor=ImmediateExecutor(),
@@ -270,6 +308,16 @@ def test_sim_and_manual_discovery_never_invoke_clock_sync():
             address="127.0.0.1",
             port=8765,
             profile="sim",
+            reachable=True,
+        ),
+        RuntimeEndpointSummary(
+            endpoint_id="runtime-hil",
+            source="mdns",
+            runtime_name="HIL",
+            base_url="http://10.42.0.15:8765",
+            address="10.42.0.15",
+            port=8765,
+            profile="hil",
             reachable=True,
         ),
         RuntimeEndpointSummary(

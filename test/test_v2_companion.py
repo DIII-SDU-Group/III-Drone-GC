@@ -16,9 +16,11 @@ from iii_drone_gc.v2_companion import (
 
 
 class FakeClient:
-    def __init__(self, observations, configuration=None, *, sessions=None):
+    def __init__(self, observations, configuration=None, *, sessions=None, clocks=None):
         self.hostname = HOSTNAME
         self.observations = iter(observations)
+        # The aircraft clock reports; None: the runtime cannot report it.
+        self.clocks = iter(clocks) if clocks is not None else None
         self.sessions = sessions or {"a" * 64: _session("a" * 64)}
         self.current_session = next(iter(self.sessions))
         self.configuration = configuration
@@ -27,6 +29,11 @@ class FakeClient:
 
     def observe(self):
         return next(self.observations)
+
+    def clock_status(self):
+        if self.clocks is None:
+            return None
+        return next(self.clocks)
 
     def configuration_state(self):
         if self.configuration is not None:
@@ -108,6 +115,24 @@ def _session(session_id, *, profile="real", release_id=None):
     }
 
 
+UNSETTLED = {"applicable": True, "settled": False, "detail": "chrony is not synchronized (Not synchronised)"}
+SETTLED = {"applicable": True, "settled": True, "detail": "synchronized to 10.42.0.1, offset +0.000100 s"}
+
+SYNC_COMMAND = [
+    "iii",
+    "host",
+    "clock",
+    "sync",
+    "--profile",
+    "real",
+    "--host",
+    "iii.local",
+    "--confirm",
+    "--non-interactive",
+    "--json",
+]
+
+
 def _companion(tmp_path: Path, role: str, observations, *, runner=None, client=None):
     kwargs = {}
     if runner is not None:
@@ -156,20 +181,102 @@ def test_clock_syncs_real_once_and_retries_only_after_disappearance(tmp_path):
     assert companion.run_once()["outcome"] == "waiting"
     assert companion.run_once()["outcome"] == "synchronized"
     assert len(calls) == 2
-    assert calls[0][0] == [
-        "iii",
-        "system",
-        "clock",
-        "sync",
-        "--target",
-        "real",
-        "--profile",
-        "real",
-        "--confirm",
-        "--non-interactive",
-        "--json",
-    ]
+    assert calls[0][0] == SYNC_COMMAND
     assert calls[0][1]["stdin"] is not None
+    assert calls[0][1]["timeout"] == 45
+
+
+def test_clock_syncs_an_unsettled_opti_track_aircraft_and_skips_a_settled_one(tmp_path):
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    opti_track = RuntimeObservation(True, "opti_track", "iii-runtime", "iii-drone")
+    unavailable = RuntimeObservation(False, None, None, None, "URLError")
+    companion = _companion(
+        tmp_path,
+        "clock",
+        [opti_track, opti_track, unavailable, opti_track],
+        runner=runner,
+        client=FakeClient(
+            [opti_track, opti_track, unavailable, opti_track],
+            clocks=[UNSETTLED, SETTLED, SETTLED],
+        ),
+    )
+
+    first = companion.run_once()
+    assert first["outcome"] == "synchronized"
+    assert first["action"] == "aircraft-clock-sync"
+    assert first["clock"] == {"settled": False, "detail": UNSETTLED["detail"]}
+    assert companion.run_once()["outcome"] == "settled"
+    assert companion.run_once()["outcome"] == "waiting"
+    assert companion.run_once()["outcome"] == "settled"
+    assert calls == [[*SYNC_COMMAND[:5], "opti_track", *SYNC_COMMAND[6:]]]
+
+
+def test_clock_reports_a_cli_without_the_sync_command(tmp_path):
+    def runner(argv, **kwargs):
+        del argv, kwargs
+        return SimpleNamespace(
+            returncode=64,
+            stdout='{"code": "III_USAGE_ERROR", "findings": [{"message": "argument host_command: invalid choice: \'clock\'"}]}',
+            stderr="",
+        )
+
+    real = RuntimeObservation(True, "real", "iii-runtime", "iii-drone")
+    companion = _companion(
+        tmp_path, "clock", [real], runner=runner, client=FakeClient([real], clocks=[UNSETTLED])
+    )
+
+    result = companion.run_once()
+
+    assert result["outcome"] == "sync-unavailable"
+    assert result["command_exit_code"] == 64
+
+
+def test_hil_never_invokes_aircraft_clock_alignment(tmp_path):
+    calls = []
+    companion = _companion(
+        tmp_path,
+        "clock",
+        [RuntimeObservation(True, "hil", "iii-runtime", "iii-drone")],
+        runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    assert companion.run_once()["outcome"] == "skipped-non-aircraft"
+    assert calls == []
+
+
+def test_runtime_identity_host_label_is_the_observed_system_id():
+    class _Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, limit):
+            del limit
+            return json.dumps(self.payload).encode()
+
+    def opener(request, timeout):
+        del timeout
+        assert request.full_url == "http://iii.local:8765/identity"
+        return _Response({"runtime_id": "iii-runtime", "profile": "opti_track", "host_label": "iii-drone"})
+
+    observation = RuntimeClient(opener=opener).observe()
+
+    assert observation.reachable is True
+    assert (observation.profile, observation.runtime_id, observation.system_id) == (
+        "opti_track",
+        "iii-runtime",
+        "iii-drone",
+    )
 
 
 def test_simulation_never_invokes_aircraft_clock_alignment(tmp_path):

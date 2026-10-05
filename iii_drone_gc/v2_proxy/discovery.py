@@ -15,6 +15,8 @@ from pydantic import Field
 
 from iii_drone_contracts.envelopes import ContractModel
 
+from ..clock_sync import AIRCRAFT_CLOCK_PROFILES, run_aircraft_clock_sync
+
 RUNTIME_API_SERVICE_TYPE = "_iii-runtime-api._tcp.local."
 AIRCRAFT_MDNS_HOSTNAME = "iii.local"
 
@@ -52,7 +54,7 @@ class ClockSyncCompanion(Protocol):
 
 
 class ReceiverClockSyncCompanion:
-    """Invoke the same fixed CLI receiver operation when a real runtime appears."""
+    """Ask the III CLI to sync the aircraft clock when an aircraft runtime appears."""
 
     def __init__(
         self,
@@ -70,41 +72,23 @@ class ReceiverClockSyncCompanion:
 
     def discovered(self, endpoints: list[RuntimeEndpointSummary]) -> None:
         present = {
-            endpoint.endpoint_id
+            endpoint.endpoint_id: endpoint.profile
             for endpoint in endpoints
             if endpoint.source == "mdns"
-            and endpoint.profile == "real"
+            and endpoint.profile in AIRCRAFT_CLOCK_PROFILES
             and endpoint.reachable is True
         }
         with self._lock:
             self._attempted.intersection_update(present)
-            pending = sorted(present - self._attempted - self._inflight)
+            pending = sorted(set(present) - self._attempted - self._inflight)
             for endpoint_id in pending:
                 self._inflight.add(endpoint_id)
         for endpoint_id in pending:
-            self.executor.submit(self._sync, endpoint_id)
+            self.executor.submit(self._sync, endpoint_id, present[endpoint_id])
 
-    def _sync(self, endpoint_id: str) -> None:
+    def _sync(self, endpoint_id: str, profile: str) -> None:
         try:
-            self.runner(
-                [
-                    "iii",
-                    "system",
-                    "clock",
-                    "sync",
-                    "--target",
-                    "real",
-                    "--profile",
-                    "real",
-                    "--confirm",
-                    "--non-interactive",
-                    "--json",
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=45,
-            )
+            run_aircraft_clock_sync(profile, runner=self.runner, capture_output=True)
         finally:
             with self._lock:
                 # Discovery is an event, not a retry timer.  A failed command is

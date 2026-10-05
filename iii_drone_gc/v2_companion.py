@@ -32,6 +32,8 @@ from iii_drone_contracts.configuration_capture import (
     validate_journal_batch,
 )
 
+from .clock_sync import AIRCRAFT_CLOCK_PROFILES, run_aircraft_clock_sync
+
 SCHEMA = "iii.gc-companion-state/v1"
 HOSTNAME = "iii.local"
 DISCOVERY_REQUEST_TIMEOUT_SECONDS = 5
@@ -278,7 +280,12 @@ class RuntimeClient:
                 raise CompanionError("runtime identity payload is malformed")
             profile = identity.get("profile") or value.get("profile")
             runtime_id = identity.get("runtime_id") or value.get("runtime_id")
-            system_id = identity.get("system_id") or value.get("system_id")
+            # The runtime API names its system identity host_label.
+            system_id = (
+                identity.get("system_id")
+                or identity.get("host_label")
+                or value.get("system_id")
+            )
             if profile not in {"real", "sim", "opti_track", "hil"}:
                 raise CompanionError("runtime identity has an unsupported profile")
             return RuntimeObservation(
@@ -297,6 +304,13 @@ class RuntimeClient:
                 type(exc).__name__,
                 self.hostname,
             )
+
+    def clock_status(self) -> dict[str, Any] | None:
+        """The aircraft's chrony settledness, or None if it cannot report it."""
+        try:
+            return self._get("/clock/status", authenticated=False)
+        except (CompanionError, HTTPError, URLError, OSError, ValueError):
+            return None
 
     def configuration_state(self) -> dict[str, Any]:
         return self._get(
@@ -336,6 +350,17 @@ class RuntimeClient:
             authenticated=True,
             timeout_seconds=CONFIGURATION_REQUEST_TIMEOUT_SECONDS,
         )
+
+
+def _clock_summary(value: Any) -> dict[str, Any] | None:
+    """The aircraft clock report reduced to what the companion records."""
+    if not isinstance(value, dict):
+        return None
+    detail = value.get("detail")
+    return {
+        "settled": value.get("settled") is True,
+        "detail": detail if isinstance(detail, str) else None,
+    }
 
 
 class Companion:
@@ -399,38 +424,30 @@ class Companion:
         if observation.profile == "sim":
             self._last_presence = identity
             return self._commit("skipped-simulation", observation, action="none")
-        if observation.profile != "real":
+        if observation.profile not in AIRCRAFT_CLOCK_PROFILES:
             self._last_presence = identity
-            return self._commit("skipped-non-real", observation, action="none")
+            return self._commit("skipped-non-aircraft", observation, action="none")
+        clock = _clock_summary(self.client.clock_status())
+        if clock is not None and clock["settled"] is True:
+            return self._commit("settled", observation, action="none", clock=clock)
         if identity == self._last_presence:
-            return self._commit("already-attempted", observation, action="none")
-        completed = self.runner(
-            [
-                "iii",
-                "system",
-                "clock",
-                "sync",
-                "--target",
-                "real",
-                "--profile",
-                "real",
-                "--confirm",
-                "--non-interactive",
-                "--json",
-            ],
-            check=False,
+            return self._commit(
+                "already-attempted", observation, action="none", clock=clock
+            )
+        outcome, exit_code = run_aircraft_clock_sync(
+            str(observation.profile),
+            runner=self.runner,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            timeout=45,
         )
         self._last_presence = identity
         return self._commit(
-            "synchronized" if completed.returncode == 0 else "sync-rejected",
+            outcome,
             observation,
-            action="receiver-clock-sync",
-            command_exit_code=completed.returncode,
+            action="aircraft-clock-sync",
+            command_exit_code=exit_code,
+            clock=clock,
         )
 
     def _mirror(self, observation: RuntimeObservation) -> dict[str, Any]:

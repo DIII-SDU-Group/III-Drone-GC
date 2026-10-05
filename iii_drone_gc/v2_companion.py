@@ -19,7 +19,6 @@ import signal
 import stat
 import subprocess
 import threading
-import time
 from typing import Any, Callable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -320,8 +319,7 @@ class Companion:
         *,
         role: str,
         state_root: Path,
-        registry_root: Path,
-        operations_root: Path | None = None,
+        operations_root: Path,
         client: RuntimeClient,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ) -> None:
@@ -333,10 +331,7 @@ class Companion:
             )
         self.role = role
         self.state_root = _require_private_directory(state_root)
-        self.registry_root = registry_root.expanduser().absolute()
-        self.operations_root = _require_private_directory(
-            operations_root or self.registry_root / "operations"
-        )
+        self.operations_root = _require_private_directory(operations_root)
         self.client = client
         self.runner = runner
         self._last_presence: tuple[str | None, str | None] | None = None
@@ -655,7 +650,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--runtime-host", choices=(HOSTNAME, "localhost"), default=HOSTNAME
     )
     parser.add_argument("--state-root", type=Path)
-    parser.add_argument("--registry-root", type=Path)
     parser.add_argument("--operations-root", type=Path)
     return parser
 
@@ -668,15 +662,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))
     )
     state_root = args.state_root or state_home / "iii/gc"
-    registry_root = args.registry_root or Path(
-        os.environ.get("III_REGISTRY_ROOT", str(state_home / "iii/registry"))
-    )
     workspace = Path(os.environ.get("WORKSPACE_DIR", str(Path.home())))
     operations_root = args.operations_root or workspace / ".iii/operations"
     companion = Companion(
         role=args.role,
         state_root=state_root,
-        registry_root=registry_root,
         operations_root=operations_root,
         client=RuntimeClient(port=args.port, hostname=args.runtime_host),
     )

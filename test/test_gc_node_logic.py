@@ -63,6 +63,7 @@ for name, value in {
     "Target": _StubMessage,
     "StringStamped": _StubMessage,
     "Powerline": _StubMessage,
+    "SingleLine": _StubMessage,
     "ChargerOperatingMode": _StubMessage,
     "ChargerStatus": _StubMessage,
     "GripperStatus": _StubGripperStatus,

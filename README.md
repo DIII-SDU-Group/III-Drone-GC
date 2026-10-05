@@ -23,7 +23,6 @@ implementation only:
 
 - `gc_node.py`: operator-facing aggregation node; centralizes subscriptions, service clients, callbacks, and helper getters
 - `gui.py`: Tk GUI implementation built around `IIIGCNode`
-- `gui_original.py`: earlier Tk implementation kept for reference
 
 Do not build new GUI v2 behavior on `IIIGCNode`. Map legacy diagnostics and
 commands into runtime API domains/pages instead.

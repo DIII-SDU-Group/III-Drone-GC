@@ -140,7 +140,6 @@ def _companion(tmp_path: Path, role: str, observations, *, runner=None, client=N
     return Companion(
         role=role,
         state_root=tmp_path / "state",
-        registry_root=tmp_path / "registry",
         operations_root=tmp_path / "workspace/.iii/operations",
         client=client or FakeClient(observations),
         **kwargs,

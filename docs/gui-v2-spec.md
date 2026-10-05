@@ -316,7 +316,7 @@ Recommended architecture:
   commands instead of SSH command forwarding.
 - SSH should be removed from CLI runtime-control paths except for workflows
   that inherently require SSH, such as file transfer/synchronization and
-  explicitly opening an `iii ssh` shell.
+  explicitly opening an SSH shell.
 - Migrating the CLI remote profile runtime-control commands to
   `iii-runtime-api` is in scope for this sweep.
 - SSH command forwarding for remote runtime-control commands should be removed

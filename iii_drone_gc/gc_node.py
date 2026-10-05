@@ -13,7 +13,6 @@ operator commands behind simpler Python methods.
 # ROS2:
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 
 from tf2_ros.buffer import Buffer
@@ -21,10 +20,9 @@ from tf2_ros.transform_listener import TransformListener
 
 ###############################################################################
 # ROS2 interfaces:
-from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
-from std_msgs.msg import Int16, Float32, String
+from std_msgs.msg import Float32
 from rcl_interfaces.msg import ParameterEvent, Parameter
 
 ###############################################################################
@@ -35,6 +33,7 @@ from iii_drone_interfaces.msg import (
     Target,
     StringStamped,
     Powerline,
+    SingleLine,
     ChargerOperatingMode,
     ChargerStatus,
     GripperStatus,
@@ -47,7 +46,7 @@ from iii_drone_interfaces.srv import GetParameterYaml, GetDeclaredParameters, Sa
 
 ###############################################################################
 # Custom modules:
-from iii_drone_core.utils.math import *
+from iii_drone_core.utils.math import quatToMat
 try:
     from iii_drone_mission.operations_client import OperationsClient
 except ModuleNotFoundError:
@@ -59,7 +58,6 @@ import numpy as np
 
 ###############################################################################
 # Python:
-import os
 from threading import Lock
 import yaml
 
@@ -806,8 +804,6 @@ class IIIGCNode(Node):
             self.action_status = "Waiting for reply"
             self.action_status_lock_.release()
 
-        gripper_status = self.get_gripper_status()
-
         if not self.gripper_command_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):
                 self.action_status = "Cancelled"
@@ -828,8 +824,6 @@ class IIIGCNode(Node):
             self.current_action = "CloseGripper"
             self.action_status = "Waiting for reply"
             self.action_status_lock_.release()
-
-        gripper_status = self.get_gripper_status()
 
         if not self.gripper_command_srv_client.wait_for_service(timeout_sec=5.0):
             if self.action_status_lock_.acquire(blocking=True):

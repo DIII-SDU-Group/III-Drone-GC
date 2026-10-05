@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from concurrent.futures import Executor, ThreadPoolExecutor
-import subprocess
-import threading
 from time import sleep
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -15,7 +11,6 @@ from pydantic import Field
 
 from iii_drone_contracts.envelopes import ContractModel
 
-from ..clock_sync import AIRCRAFT_CLOCK_PROFILES, run_aircraft_clock_sync
 
 RUNTIME_API_SERVICE_TYPE = "_iii-runtime-api._tcp.local."
 AIRCRAFT_MDNS_HOSTNAME = "iii.local"
@@ -47,56 +42,6 @@ class ManualEndpointRequest(ContractModel):
 
 class DiscoveryProvider(Protocol):
     def scan(self, *, timeout_s: float = 1.0) -> list[RuntimeEndpointSummary]: ...
-
-
-class ClockSyncCompanion(Protocol):
-    def discovered(self, endpoints: list[RuntimeEndpointSummary]) -> None: ...
-
-
-class ReceiverClockSyncCompanion:
-    """Ask the III CLI to sync the aircraft clock when an aircraft runtime appears."""
-
-    def __init__(
-        self,
-        *,
-        executor: Executor | None = None,
-        runner=subprocess.run,
-    ):
-        self.executor = executor or ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="iii-clock-sync"
-        )
-        self.runner = runner
-        self._attempted: set[str] = set()
-        self._inflight: set[str] = set()
-        self._lock = threading.Lock()
-
-    def discovered(self, endpoints: list[RuntimeEndpointSummary]) -> None:
-        present = {
-            endpoint.endpoint_id: endpoint.profile
-            for endpoint in endpoints
-            if endpoint.source == "mdns"
-            and endpoint.profile in AIRCRAFT_CLOCK_PROFILES
-            and endpoint.reachable is True
-        }
-        with self._lock:
-            self._attempted.intersection_update(present)
-            pending = sorted(set(present) - self._attempted - self._inflight)
-            for endpoint_id in pending:
-                self._inflight.add(endpoint_id)
-        for endpoint_id in pending:
-            self.executor.submit(self._sync, endpoint_id, present[endpoint_id])
-
-    def _sync(self, endpoint_id: str, profile: str) -> None:
-        try:
-            run_aircraft_clock_sync(profile, runner=self.runner, capture_output=True)
-        finally:
-            with self._lock:
-                # Discovery is an event, not a retry timer.  A failed command is
-                # retained by the CLI operation/result machinery and must not be
-                # launched again on every frontend discovery poll.  A genuine
-                # disappearance/reappearance creates a new discovery attempt.
-                self._attempted.add(endpoint_id)
-                self._inflight.discard(endpoint_id)
 
 
 class StaticDiscoveryProvider:
@@ -159,10 +104,8 @@ class RuntimeDiscoveryService:
     def __init__(
         self,
         provider: DiscoveryProvider | None = None,
-        clock_sync_companion: ClockSyncCompanion | None = None,
     ):
         self.provider = provider or ZeroconfDiscoveryProvider()
-        self.clock_sync_companion = clock_sync_companion
         self._manual_endpoints: dict[str, RuntimeEndpointSummary] = {}
         self._last_discovered: dict[str, RuntimeEndpointSummary] = {}
 
@@ -172,8 +115,6 @@ class RuntimeDiscoveryService:
             for endpoint in self.provider.scan(timeout_s=timeout_s)
         }
         self._last_discovered = discovered
-        if self.clock_sync_companion is not None:
-            self.clock_sync_companion.discovered(list(discovered.values()))
         return sorted(
             _deduplicate_by_base_url(
                 [*discovered.values(), *self._manual_endpoints.values()]

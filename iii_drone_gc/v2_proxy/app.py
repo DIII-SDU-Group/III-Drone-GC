@@ -117,9 +117,9 @@ def create_app(
     websocket_proxy: WebSocketProxyTransport | None = None,
 ) -> FastAPI:
     proxy_settings = settings or GCProxySettings.from_env()
-    # Clock synchronization is owned by the independent login companion.  The
+    # Clock synchronization is owned by the independent login companion. The
     # proxy remains request-driven and must not turn browser discovery polls into
-    # a second scheduler for the privileged receiver operation.
+    # a second scheduler for the privileged clock sync.
     runtime_discovery = discovery_service or RuntimeDiscoveryService()
     runtime_targets = target_manager or RuntimeTargetManager(
         discovery=runtime_discovery,

@@ -7,7 +7,8 @@ a request to keep legacy implementation details.
 Legacy sources:
 
 - `iii_drone_gc/gui.py`: current Tk GUI.
-- `iii_drone_gc/gui_original.py`: earlier Tk GUI retained for reference.
+- `iii_drone_gc/gui_original.py`: earlier Tk GUI, removed after this review
+  (it no longer imported); retrieve it from Git history if needed.
 - `iii_drone_gc/gc_node.py`: legacy ROS topic/service aggregation and command
   plumbing.
 

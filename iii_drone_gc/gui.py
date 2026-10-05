@@ -18,13 +18,11 @@ from rclpy.parameter import ParameterValue
 
 ###############################################################################
 # ROS2 interfaces:
-from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
-from nav_msgs.msg import Path
 
 ###############################################################################
 # Custom modules:
-from iii_drone_core.utils.math import *
+from iii_drone_core.utils.math import eulToQuat, quatToMat
 from iii_drone_configuration.parameter_handler import ParameterHandler
 from iii_drone_gc.gc_node import IIIGCNode
 
@@ -49,8 +47,6 @@ from PIL import ImageTk, Image
 import os
 from threading import Thread
 from time import sleep
-import yaml
-import subprocess
 from datetime import datetime
 
 ###############################################################################
@@ -1305,8 +1301,6 @@ class IIIGui():
         self.fill_parameter_table()
 
     def update_available_actions(self):
-        gripper_status: GripperStatus = self.node.get_gripper_status()
-
         # OpenGripper:
         if self.action_status == "Executing":
             self.open_gripper_button.config(state="disabled")
@@ -2129,9 +2123,6 @@ class IIIGui():
                 second_cable_id_stringvar,
                 *cable_ids
             )
-
-            first_cable_id = None
-            second_cable_id = None
 
             def on_ok_btn_click():
                 fail = False

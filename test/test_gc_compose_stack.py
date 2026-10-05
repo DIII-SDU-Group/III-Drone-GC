@@ -65,22 +65,21 @@ def test_gc_release_images_pin_exact_base_images_and_proxy_dependencies():
     assert all(not any(token in line for token in (">", "<", "~")) for line in pins)
 
 
-def test_gui_v2_security_docs_record_trusted_network_decision():
-    deployment = (PACKAGE_ROOT / "docs" / "gui-v2-deployment.md").read_text(
-        encoding="utf-8"
-    )
-    checklist = (PACKAGE_ROOT / "docs" / "gui-v2-security-checklist.md").read_text(
-        encoding="utf-8"
-    )
-    spec = (PACKAGE_ROOT / "docs" / "gui-v2-spec.md").read_text(encoding="utf-8")
+def _normalized_doc(name):
+    return " ".join((PACKAGE_ROOT / "docs" / name).read_text(encoding="utf-8").split())
 
-    for text in (deployment, checklist, spec):
-        assert "trusted isolated operator network" in text
-        assert "TLS is deferred" in text
 
-    assert "III_RUNTIME_API_REQUIRE_SECRETS=1" in checklist
-    assert "III_GC_PROXY_CORS_ORIGINS" in checklist
-    assert "TCP `8765`" in checklist
-    assert "TCP `8780`" in checklist
-    assert "UDP `5353`" in checklist
-    assert "not a cryptographic identity proof" in deployment
+def test_gui_v2_docs_record_unrestricted_developer_access_decision():
+    deployment = _normalized_doc("gui-v2-deployment.md")
+    checklist = _normalized_doc("gui-v2-security-checklist.md")
+    spec = _normalized_doc("gui-v2-spec.md")
+
+    assert "no browser password, CLI token, receiver credential store, runtime API firewall policy" in deployment
+    assert "deliberately unrestricted for rapid prototyping" in deployment
+    for text in (checklist, spec):
+        assert (
+            "without application authentication, runtime tokens, firewall rules, or deployment credentials"
+            in text
+        )
+        assert "remain enforced by the runtime command handlers" in text
+    assert "single-session and TLS design described elsewhere in this spec is not implemented" in spec

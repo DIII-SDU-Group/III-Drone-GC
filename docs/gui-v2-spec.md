@@ -882,12 +882,15 @@ The ground-control backend/proxy is intentionally thin:
 
 Security/network decision:
 
-- The first GUI v2 deployment uses a trusted isolated operator network plus
-  runtime API browser-password and CLI-token authentication.
-- TLS is deferred for the first field deployment and must be added before GUI v2
-  is exposed outside a trusted isolated operator network.
-- See `gui-v2-deployment.md` and `gui-v2-security-checklist.md` for the
-  deployment controls and deferred TLS risks.
+- GUI v2 runs on the development and field-test network without application
+  authentication, runtime tokens, firewall rules, or deployment credentials;
+  access is deliberately unrestricted for rapid prototyping. Flight-safety
+  checks (vehicle state, disarm, landed, mode) remain enforced by the runtime
+  command handlers.
+- The browser-password, CLI-token, single-session and TLS design described
+  elsewhere in this spec is not implemented.
+- See `gui-v2-deployment.md` and `gui-v2-security-checklist.md` for the current
+  developer-access decision.
 
 Frontend serving decision:
 

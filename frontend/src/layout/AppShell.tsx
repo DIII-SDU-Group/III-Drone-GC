@@ -43,7 +43,7 @@ import {
 } from "../pages";
 import { flightDisabledReason } from "../pages/FlightPage";
 import { operationCancelDisabledReason } from "../pages/OperationsPage";
-import { initialRuntimeStoreState, type RuntimeStoreState } from "../state";
+import { initialRuntimeStoreState, profileSurfaceUnavailableReason, type RuntimeStoreState } from "../state";
 import { formatBytes } from "../format/bytes";
 
 export type AppPage =
@@ -599,7 +599,18 @@ function airLabel(value: boolean | null | undefined): string {
 }
 
 function dashboardModeLabel(state: RuntimeStoreState): string {
-  const domains = Object.values(state.domains);
+  // Domains of surfaces the profile lacks are expectedly empty, not issues.
+  const absent = new Set<string>();
+  if (profileSurfaceUnavailableReason(state, "perception")) {
+    absent.add("perception");
+    absent.add("powerline");
+  }
+  if (profileSurfaceUnavailableReason(state, "payload")) {
+    absent.add("payload");
+  }
+  const domains = Object.entries(state.domains)
+    .filter(([name]) => !absent.has(name))
+    .map(([, domain]) => domain);
   const issueCount = domains.filter(
     (domain) =>
       domain?.freshness === "stale" ||

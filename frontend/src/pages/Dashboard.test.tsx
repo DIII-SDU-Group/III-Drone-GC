@@ -104,4 +104,18 @@ describe("Dashboard", () => {
     expect(payloadPanel).toHaveClass("diagnostic-panel--missing");
     expect(within(payloadPanel).getAllByText("unknown").length).toBeGreaterThan(0);
   });
+
+  it("hides the surfaces an opti_track profile lacks", () => {
+    const optiTrack = state();
+    optiTrack.domains.system = {
+      ...optiTrack.domains.system,
+      capabilities: { profile: "opti_track", payload_available: false, perception_available: false, overviews_available: false },
+    };
+
+    render(<Dashboard state={optiTrack} />);
+
+    for (const heading of ["Perception and Powerline", "Payload", "Map and Geometry"]) {
+      expect(screen.queryByRole("heading", { name: heading })).not.toBeInTheDocument();
+    }
+  });
 });

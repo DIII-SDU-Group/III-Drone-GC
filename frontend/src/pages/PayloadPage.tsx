@@ -3,7 +3,7 @@ import { useState } from "react";
 import { DisabledControl, ToastRegion, type CommandResult, type ToastMessage } from "../components";
 import type { RuntimeCommandDispatcher } from "../api/commands";
 import type { CommandResponse } from "../generated/contracts";
-import type { RuntimeStoreState } from "../state";
+import { profileSurfaceUnavailableReason, type RuntimeStoreState } from "../state";
 
 export function PayloadPage({
   state,
@@ -15,6 +15,7 @@ export function PayloadPage({
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const disabledReason = gripperDisabledReason(state);
+  const profileRestriction = profileSurfaceUnavailableReason(state, "payload");
 
   async function run(commandId: string) {
     if (pendingCommand) return;
@@ -33,6 +34,7 @@ export function PayloadPage({
 
   return (
     <div className="workflow-page payload-page">
+      {profileRestriction ? <p className="control-reason profile-restriction" role="note">{profileRestriction}</p> : null}
       <section className="workflow-section">
         <h3>Payload Status</h3>
         <dl className="status-list">
@@ -84,6 +86,10 @@ function gripperActionDisabledReason(state: RuntimeStoreState, target: "open" | 
 }
 
 function gripperDisabledReason(state: RuntimeStoreState): string | undefined {
+  const profileRestriction = profileSurfaceUnavailableReason(state, "payload");
+  if (profileRestriction) {
+    return profileRestriction;
+  }
   if (state.connection.commands_disabled_reason) {
     return state.connection.commands_disabled_reason;
   }

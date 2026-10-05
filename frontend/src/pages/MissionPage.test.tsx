@@ -488,6 +488,46 @@ describe("MissionPage", () => {
     expect(screen.getByRole("button", { name: "Start Inspection" })).toBeDisabled();
   });
 
+  it("replaces inspection preparation, charging and cable intents in a profile without them", () => {
+    const state = readyState();
+    state.domains.system!.capabilities = {
+      profile: "opti_track",
+      payload_available: false,
+      perception_available: false,
+      overviews_available: false,
+      cable_intents_available: false,
+      custom_operations: ["fly_to_position", "hover"],
+    };
+    state.domains.mission!.latest = { owned_mode: "opti_track_flight" };
+    state.domains.mission!.mission_state = "active";
+    state.domains.mission!.modes = [{ mode_key: "opti_track_flight", display_name: "OptiTrack Flight", mode_id: 30, registered: true, active: true, tree_running: true, tree_finished: false, freshness: "fresh" }];
+    state.domains.mission!.preflight = {
+      ready: false,
+      items: [{ key: "vision_fusion", label: "PX4 external-vision fusion", passed: false, hard_gate: true, source: "PX4 EstimatorStatusFlags", detail: "position fused, height not fused, yaw fused (fresh)" }],
+    };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getAllByRole("note").map((note) => note.textContent)).toEqual([
+      "Overview capture is not available in the opti_track profile. The onboard preflight checks positioning instead.",
+      "Cable intent control is not available in the opti_track profile.",
+    ]);
+    expect(screen.queryByText(/Powerline overview/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Endpoint 1/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Charger")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Recharge now" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("PX4 external-vision fusion").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Battery" })).toBeInTheDocument();
+  });
+
+  it("starts an inspection-named root without overview checks when the profile has no overviews", () => {
+    const state = readyState();
+    state.domains.system!.capabilities = { profile: "opti_track", overviews_available: false };
+    state.domains.powerline!.stored_overview_valid = false;
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start Inspection" })).toBeEnabled();
+  });
+
   it("keeps a selected mission blocked by an onboard activation rejection", () => {
     const state = readyState();
     state.domains.control!.latest = { command_permissions: { "mission.activate": ["PX4 mode is not selectable"] } };

@@ -178,6 +178,24 @@ describe("PerceptionPage", () => {
     expect(screen.getByRole("button", { name: "Freeze mapper" })).toBeDisabled();
   });
 
+  it("disables perception and overview controls with the reason when the profile lacks them", () => {
+    const dispatchCommand = vi.fn();
+    const restricted = state();
+    restricted.domains.system = {
+      capabilities: { profile: "opti_track", perception_available: false, overviews_available: false },
+    };
+    render(<PerceptionPage state={restricted} dispatchCommand={dispatchCommand} />);
+
+    const perception = "Powerline perception is not available in the opti_track profile.";
+    const overview = "Overview capture is not available in the opti_track profile.";
+    expect(screen.getAllByRole("note").map((note) => note.textContent)).toEqual([perception, overview]);
+    expect(screen.getByRole("button", { name: "Start mapper" })).toHaveAccessibleDescription(perception);
+    expect(screen.getByRole("button", { name: "Store approved overview" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Capture endpoint" })[0]).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Start mapper" }));
+    expect(dispatchCommand).not.toHaveBeenCalled();
+  });
+
   it("shows command rejections from the runtime", async () => {
     vi.useFakeTimers();
     const dispatchCommand = vi.fn().mockResolvedValue({

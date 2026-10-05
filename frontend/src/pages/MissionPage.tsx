@@ -4,7 +4,7 @@ import type { RuntimeCommandDispatcher } from "../api/commands";
 import { MapView } from "../components/MapView";
 import { PressAndHoldButton, ToastRegion, type CommandResult, type ToastMessage } from "../components";
 import type { CommandResponse, InspectionPreflightItem, MapState } from "../generated/contracts";
-import type { RuntimeStoreState } from "../state";
+import { profileSurfaceUnavailableReason, type RuntimeStoreState } from "../state";
 
 const APPROVAL_KEY = "iii-drone:inspection:perception-approved-at";
 const PREPARATION_SNAPSHOT_KEY = "iii-drone:inspection:preparation-at-activation";
@@ -59,6 +59,11 @@ export function MissionPage({
   const selectionProfile = catalogProfile ?? runtimeProfile;
   const selectedCatalog = catalogEntries.find((entry) => entry.id === pendingCatalogId);
   const catalogMutationReason = missionCatalogMutationDisabledReason(state, selectionProfile, catalogSelecting);
+  // A profile without overviews (opti_track) has no inspection preparation;
+  // one without payload has no charger; one without a cable has no intents.
+  const overviewRestriction = profileSurfaceUnavailableReason(state, "overviews");
+  const payloadRestriction = profileSurfaceUnavailableReason(state, "payload");
+  const intentRestriction = profileSurfaceUnavailableReason(state, "cable_intents");
   const applyCatalogReason = catalogMutationReason
     ?? (catalogEntries.length === 0 ? "Refresh installed missions before selecting one." : undefined)
     ?? (!pendingCatalogId ? "Select a compatible installed mission." : undefined);
@@ -180,24 +185,29 @@ export function MissionPage({
       <section aria-label="Preparation" className={missionInProgress ? "workflow-section mission-preparation mission-preparation--frozen" : "workflow-section mission-preparation"} aria-disabled={missionInProgress}>
         <div className="workflow-section__heading">
           <h3>Preparation</h3>
-          <span>{missionInProgress ? "locked at activation" : preparation.eligibility?.eligible && preparation.pylonValid && preparation.storedOverviewValid ? "ready" : "attention required"}</span>
+          <span>{missionInProgress ? "locked at activation" : (overviewRestriction ? preparation.preflight?.ready : preparation.eligibility?.eligible && preparation.pylonValid && preparation.storedOverviewValid) ? "ready" : "attention required"}</span>
         </div>
+        {overviewRestriction ? <p className="control-hint" role="note">{overviewRestriction} The onboard preflight checks positioning instead.</p> : null}
         <ol className="mission-checklist">
           <Check labels={["Aircraft system ready", "Aircraft system not ready", "Aircraft system state unknown"]} value={preparation.systemActive} detail={preparation.systemDegradedReason} />
-          <Check
-            labels={["Perception review acknowledged", "Perception review not acknowledged", "Perception review not acknowledged"]}
-            value={Boolean(preparation.approvedAt)}
-            detail={preparation.approvedAt ? `Acknowledged ${formatTime(preparation.approvedAt)}` : undefined}
-            action={<button type="button" onClick={onOpenPerception}>Review perception</button>}
-          />
-          <Check labels={["Powerline overview stored", "Powerline overview not stored", "Powerline overview state unknown"]} value={preparation.storedOverviewValid} detail={preparation.storedOverviewSource} />
-          <Check labels={["Endpoint 1 captured", "Endpoint 1 not captured", "Endpoint 1 state unknown"]} value={preparation.pylonKnown ? preparation.pylonIds.includes(1) : undefined} />
-          <Check labels={["Endpoint 2 captured", "Endpoint 2 not captured", "Endpoint 2 state unknown"]} value={preparation.pylonKnown ? preparation.pylonIds.includes(2) : undefined} />
-          <Check labels={["Corridor geometry valid", "Corridor geometry invalid", "Corridor geometry state unknown"]} value={preparation.eligibility?.evaluable} />
-          <Check labels={["Eligible inspection start position", "Ineligible inspection start position", "Inspection start position unknown"]} value={preparation.eligibility?.eligible} detail={preparation.eligibility?.failure_reasons?.join("; ")} />
+          {overviewRestriction ? null : (
+            <>
+              <Check
+                labels={["Perception review acknowledged", "Perception review not acknowledged", "Perception review not acknowledged"]}
+                value={Boolean(preparation.approvedAt)}
+                detail={preparation.approvedAt ? `Acknowledged ${formatTime(preparation.approvedAt)}` : undefined}
+                action={<button type="button" onClick={onOpenPerception}>Review perception</button>}
+              />
+              <Check labels={["Powerline overview stored", "Powerline overview not stored", "Powerline overview state unknown"]} value={preparation.storedOverviewValid} detail={preparation.storedOverviewSource} />
+              <Check labels={["Endpoint 1 captured", "Endpoint 1 not captured", "Endpoint 1 state unknown"]} value={preparation.pylonKnown ? preparation.pylonIds.includes(1) : undefined} />
+              <Check labels={["Endpoint 2 captured", "Endpoint 2 not captured", "Endpoint 2 state unknown"]} value={preparation.pylonKnown ? preparation.pylonIds.includes(2) : undefined} />
+              <Check labels={["Corridor geometry valid", "Corridor geometry invalid", "Corridor geometry state unknown"]} value={preparation.eligibility?.evaluable} />
+              <Check labels={["Eligible inspection start position", "Ineligible inspection start position", "Inspection start position unknown"]} value={preparation.eligibility?.eligible} detail={preparation.eligibility?.failure_reasons?.join("; ")} />
+            </>
+          )}
           <Check labels={["Mission ready", "Mission not ready", "Mission readiness unknown"]} value={preparation.preflight?.ready} detail={failedHardPreflightItems(preparation.preflight?.items)?.map((item) => item.label).join("; ")} />
         </ol>
-        {preparation.eligibility ? (
+        {preparation.eligibility && !overviewRestriction ? (
           <dl className="status-list mission-eligibility">
             <div><dt>Side</dt><dd>{preparation.eligibility.side}</dd></div>
             <div><dt>Clearance</dt><dd>{metric(preparation.eligibility.measured_lateral_clearance_m)} / {metric(preparation.eligibility.required_lateral_clearance_m)}</dd></div>
@@ -214,13 +224,17 @@ export function MissionPage({
       </section>
 
       <section className="workflow-section">
-        <div className="workflow-section__heading"><h3>Battery And Charging</h3><span>{mission?.battery_policy?.level ?? "unknown"}</span></div>
+        <div className="workflow-section__heading"><h3>{payloadRestriction ? "Battery" : "Battery And Charging"}</h3><span>{mission?.battery_policy?.level ?? "unknown"}</span></div>
         <dl className="status-list battery-status-list">
           <div><dt>Remaining</dt><dd>{percent(vehicle?.battery_remaining)}</dd></div>
-          <div><dt>Recharge trigger</dt><dd>{mission?.battery_policy?.recharge_imminent == null ? "unknown" : mission.battery_policy.recharge_imminent ? "imminent" : "not reached"}</dd></div>
-          <div><dt>Onboard threshold</dt><dd>{unit(mission?.battery_policy?.recharge_threshold_value, mission?.battery_policy?.recharge_threshold_unit ?? "V")}</dd></div>
-          <div><dt>Charger</dt><dd>{state.domains.payload?.charger_status ?? "unknown"}</dd></div>
-          <div><dt>Gripper</dt><dd>{state.domains.payload?.gripper_status ?? "unknown"}</dd></div>
+          {payloadRestriction ? null : (
+            <>
+              <div><dt>Recharge trigger</dt><dd>{mission?.battery_policy?.recharge_imminent == null ? "unknown" : mission.battery_policy.recharge_imminent ? "imminent" : "not reached"}</dd></div>
+              <div><dt>Onboard threshold</dt><dd>{unit(mission?.battery_policy?.recharge_threshold_value, mission?.battery_policy?.recharge_threshold_unit ?? "V")}</dd></div>
+              <div><dt>Charger</dt><dd>{state.domains.payload?.charger_status ?? "unknown"}</dd></div>
+              <div><dt>Gripper</dt><dd>{state.domains.payload?.gripper_status ?? "unknown"}</dd></div>
+            </>
+          )}
         </dl>
       </section>
 
@@ -289,12 +303,14 @@ export function MissionPage({
 
       <section className="workflow-section">
         <div className="workflow-section__heading"><h3>Mission Intent</h3><span>{activeMode?.display_name ?? "inactive"}</span></div>
-        <div className="mission-intents">
-          {activeMode?.mode_key === "inspection_demo" ? <MissionIntent label="Recharge now" command="mission.recharge_now" state={mission?.intents?.find((item) => item.intent_key === "trigger_recharge_now")?.lifecycle} run={run} /> : null}
-          {activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Stay on cable" command="mission.stay_on_cable" state={mission?.intents?.find((item) => item.intent_key === "stay_on_cable")?.lifecycle} run={run} /> : null}
-          {activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Leave cable now" command="mission.leave_cable_now" state={mission?.intents?.find((item) => item.intent_key === "interrupt_recharging_now")?.lifecycle} run={run} /> : null}
-          {!activeMode ? <p>No mission intent is available while the inspection mission is inactive.</p> : null}
-        </div>
+        {intentRestriction ? <p className="control-reason" role="note">{intentRestriction}</p> : (
+          <div className="mission-intents">
+            {activeMode?.mode_key === "inspection_demo" ? <MissionIntent label="Recharge now" command="mission.recharge_now" state={mission?.intents?.find((item) => item.intent_key === "trigger_recharge_now")?.lifecycle} run={run} /> : null}
+            {activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Stay on cable" command="mission.stay_on_cable" state={mission?.intents?.find((item) => item.intent_key === "stay_on_cable")?.lifecycle} run={run} /> : null}
+            {activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Leave cable now" command="mission.leave_cable_now" state={mission?.intents?.find((item) => item.intent_key === "interrupt_recharging_now")?.lifecycle} run={run} /> : null}
+            {!activeMode ? <p>No mission intent is available while the inspection mission is inactive.</p> : null}
+          </div>
+        )}
         {activeIntents.length ? <ol className="intent-history" aria-label="Mission intent lifecycle">{activeIntents.map((intent) => <li key={intent.intent_key}><strong>{intent.label}</strong><span>{intentLifecycleLabel(intent.lifecycle ?? "cleared")}</span>{intent.detail ? <small>{intent.detail}</small> : null}</li>)}</ol> : null}
       </section>
 
@@ -354,8 +370,9 @@ function missionStartDisabledReason(state: RuntimeStoreState, ownedModeKey: stri
   const rejection = reasons.find((reason) => typeof reason === "string" && reason.length > 0);
   if (typeof rejection === "string") return rejection;
   // Inspection retains its operator preparation/geometry checks. Other catalog
-  // roots use their live onboard activation and overview rejections.
-  if (ownedModeKey !== "inspection_demo") {
+  // roots, and every root of a profile without overviews, use their live
+  // onboard activation and overview rejections.
+  if (ownedModeKey !== "inspection_demo" || profileSurfaceUnavailableReason(state, "overviews")) {
     if (state.domains.vehicle?.armed !== true || state.domains.vehicle?.in_air !== true) return "Aircraft must be armed and airborne; position it with RC or QGroundControl.";
     return undefined;
   }

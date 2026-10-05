@@ -63,8 +63,9 @@ def test_gc_proxy_allows_configured_frontend_origin():
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
 
 
-def test_real_gc_profile_requires_pinned_identity_and_explicit_cors(monkeypatch):
-    monkeypatch.setenv("III_GC_EXPECTED_PROFILE", "real")
+@pytest.mark.parametrize("profile", ["real", "opti_track"])
+def test_aircraft_gc_profile_requires_pinned_identity_and_explicit_cors(monkeypatch, profile):
+    monkeypatch.setenv("III_GC_EXPECTED_PROFILE", profile)
     monkeypatch.delenv("III_GC_EXPECTED_RUNTIME_ID", raising=False)
     monkeypatch.delenv("III_GC_EXPECTED_SYSTEM_ID", raising=False)
 
@@ -79,15 +80,16 @@ def test_real_gc_profile_requires_pinned_identity_and_explicit_cors(monkeypatch)
         GCProxySettings.from_env()
 
 
-def test_real_gc_profile_accepts_pinned_identity_and_explicit_cors(monkeypatch):
-    monkeypatch.setenv("III_GC_EXPECTED_PROFILE", "real")
+@pytest.mark.parametrize("profile", ["real", "opti_track"])
+def test_aircraft_gc_profile_accepts_pinned_identity_and_explicit_cors(monkeypatch, profile):
+    monkeypatch.setenv("III_GC_EXPECTED_PROFILE", profile)
     monkeypatch.setenv("III_GC_EXPECTED_RUNTIME_ID", "aircraft-7-runtime")
     monkeypatch.setenv("III_GC_EXPECTED_SYSTEM_ID", "aircraft-7")
     monkeypatch.setenv("III_GC_PROXY_CORS_ORIGINS", "http://127.0.0.1:5173")
 
     settings = GCProxySettings.from_env()
 
-    assert settings.expected_profile == "real"
+    assert settings.expected_profile == profile
     assert settings.expected_runtime_id == "aircraft-7-runtime"
     assert settings.expected_system_id == "aircraft-7"
 

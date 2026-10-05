@@ -33,6 +33,10 @@ from .proxy import (
 from .targets import RuntimeTargetManager, RuntimeTargetState, TargetSelectionRequest
 
 
+# Profiles that fly a physical aircraft: the operator must pin its identity.
+AIRCRAFT_PROFILES = frozenset({"real", "opti_track"})
+
+
 @dataclass(frozen=True)
 class GCProxySettings:
     proxy_id: str = "iii-gc-proxy"
@@ -66,7 +70,7 @@ class GCProxySettings:
             raise RuntimeError(
                 "III_GC_RUNTIME_REQUEST_TIMEOUT_SEC must be greater than zero"
             )
-        if expected_profile == "real":
+        if expected_profile in AIRCRAFT_PROFILES:
             missing = [
                 name
                 for name, value in (
@@ -77,11 +81,13 @@ class GCProxySettings:
             ]
             if missing:
                 raise RuntimeError(
-                    "real ground-control profile requires: " + ", ".join(missing)
+                    f"{expected_profile} ground-control profile requires: "
+                    + ", ".join(missing)
                 )
             if not cors_origins or "*" in cors_origins:
                 raise RuntimeError(
-                    "real ground-control profile requires explicit III_GC_PROXY_CORS_ORIGINS"
+                    f"{expected_profile} ground-control profile requires explicit "
+                    "III_GC_PROXY_CORS_ORIGINS"
                 )
         return cls(
             proxy_id=os.environ.get("III_GC_PROXY_ID", "iii-gc-proxy"),

@@ -16,6 +16,17 @@ export function profileCapabilities(state: RuntimeStoreState): ProfileCapabiliti
   return state.domains.system?.capabilities ?? undefined;
 }
 
+// The runtime API's own profile is authoritative for boot and start: before
+// the system is booted supervision may not report one.
+export function runtimeProfile(state: RuntimeStoreState): string | undefined {
+  const candidates = [
+    profileCapabilities(state)?.profile,
+    state.domains.system?.latest?.profile,
+    state.domains.simulation?.profile,
+  ];
+  return candidates.find((value): value is string => typeof value === "string" && value.length > 0 && value !== "unknown");
+}
+
 // A runtime that advertises no capabilities supports every surface.
 export function profileSurfaceUnavailableReason(state: RuntimeStoreState, surface: ProfileSurface): string | undefined {
   const capabilities = profileCapabilities(state);

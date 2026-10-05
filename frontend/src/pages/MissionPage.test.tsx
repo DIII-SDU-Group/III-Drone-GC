@@ -519,6 +519,18 @@ describe("MissionPage", () => {
     expect(screen.getByRole("heading", { name: "Battery" })).toBeInTheDocument();
   });
 
+  it("starts the aircraft system with the runtime's own profile", () => {
+    const state = readyState();
+    state.domains.system = { booted: false, active: false, freshness: "fresh", latest: {}, capabilities: { profile: "opti_track" } };
+    const dispatchCommand = vi.fn().mockResolvedValue({ accepted: true, request_id: "start-1", command_id: "runtime.system_start" });
+    render(<MissionPage state={state} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Start III System" }));
+    act(() => vi.advanceTimersByTime(1500));
+
+    expect(dispatchCommand).toHaveBeenCalledWith("runtime.system_start", { profile: "opti_track" });
+  });
+
   it("starts an inspection-named root without overview checks when the profile has no overviews", () => {
     const state = readyState();
     state.domains.system!.capabilities = { profile: "opti_track", overviews_available: false };

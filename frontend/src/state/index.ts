@@ -8,6 +8,7 @@ export {
   customOperationUnavailableReason,
   profileCapabilities,
   profileSurfaceUnavailableReason,
+  runtimeProfile,
 } from "./capabilities";
 export type { ProfileSurface } from "./capabilities";
 export type {

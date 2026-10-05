@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { initialRuntimeStoreState, type RuntimeStoreState } from ".";
-import { customOperationUnavailableReason, profileSurfaceUnavailableReason } from "./capabilities";
+import { customOperationUnavailableReason, profileSurfaceUnavailableReason, runtimeProfile } from "./capabilities";
 
 function withCapabilities(capabilities?: NonNullable<RuntimeStoreState["domains"]["system"]>["capabilities"]): RuntimeStoreState {
   return { ...initialRuntimeStoreState, domains: { system: { capabilities } } };
@@ -41,5 +41,16 @@ describe("profile capabilities", () => {
       expect(profileSurfaceUnavailableReason(state, "cable_intents")).toBeUndefined();
       expect(customOperationUnavailableReason(state, "cable_landing")).toBeUndefined();
     }
+  });
+
+  it("boots and starts with the runtime API's own profile before supervision reports one", () => {
+    const unbooted: RuntimeStoreState = {
+      ...initialRuntimeStoreState,
+      domains: { system: { capabilities: OPTI_TRACK, latest: {} }, simulation: { profile: "unknown" } },
+    };
+
+    expect(runtimeProfile(unbooted)).toBe("opti_track");
+    expect(runtimeProfile({ ...initialRuntimeStoreState, domains: { system: { latest: { profile: "hil" } } } })).toBe("hil");
+    expect(runtimeProfile({ ...initialRuntimeStoreState, domains: { simulation: { profile: "unknown" } } })).toBeUndefined();
   });
 });

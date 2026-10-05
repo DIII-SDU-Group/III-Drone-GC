@@ -4,7 +4,7 @@ import type { RuntimeCommandDispatcher } from "../api/commands";
 import { MapView } from "../components/MapView";
 import { PressAndHoldButton, ToastRegion, type CommandResult, type ToastMessage } from "../components";
 import type { CommandResponse, InspectionPreflightItem, MapState } from "../generated/contracts";
-import { profileSurfaceUnavailableReason, type RuntimeStoreState } from "../state";
+import { profileSurfaceUnavailableReason, runtimeProfile, type RuntimeStoreState } from "../state";
 
 const APPROVAL_KEY = "iii-drone:inspection:perception-approved-at";
 const PREPARATION_SNAPSHOT_KEY = "iii-drone:inspection:preparation-at-activation";
@@ -428,8 +428,7 @@ function readSystemStartStages(response: CommandResponse): SystemStartStage[] {
   return stages.filter((stage): stage is SystemStartStage => Boolean(stage) && typeof stage === "object" && typeof (stage as SystemStartStage).stage === "string" && typeof (stage as SystemStartStage).status === "string" && typeof (stage as SystemStartStage).detail === "string");
 }
 function systemProfile(state: RuntimeStoreState): string {
-  const profile = state.domains.system?.latest?.profile ?? state.domains.simulation?.profile;
-  return typeof profile === "string" && profile ? profile : "real";
+  return runtimeProfile(state) ?? "real";
 }
 function missionCatalogProfile(activeProfile: string | null | undefined, fallbackProfile: string): string {
   return typeof activeProfile === "string" && activeProfile ? activeProfile : fallbackProfile;

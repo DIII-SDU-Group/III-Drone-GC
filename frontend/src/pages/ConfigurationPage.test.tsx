@@ -227,6 +227,18 @@ describe("ConfigurationPage", () => {
     expect(screen.getByText("Setting a default while runtime is active affects the next load or restart.")).toBeInTheDocument();
   });
 
+  it("captures with the parameter family of the runtime profile", () => {
+    for (const [runtimeProfile, target] of [["real", "real"], ["opti_track", "real"], ["hil", "sim"], ["sim", "sim"]]) {
+      const profiled = state();
+      const manifest = profiled.domains.configuration!.latest!.manifest as { status: Record<string, unknown> };
+      manifest.status.tuning_runtime_profile = runtimeProfile;
+      const { unmount } = render(<ConfigurationPage state={profiled} dispatchCommand={vi.fn()} />);
+
+      expect(screen.getByText(/--snapshot snapshots\/tuned.yaml/)).toHaveTextContent(`--target ${target} `);
+      unmount();
+    }
+  });
+
   it("disables writes in Mission mode while local capture guidance remains available", () => {
     const dispatchCommand = vi.fn();
     render(

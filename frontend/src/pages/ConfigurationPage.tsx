@@ -337,8 +337,12 @@ function mirrorStatusLabel(manifest: ConfigurationManifest): string {
   return "not required until the first tuning capture";
 }
 
+// The capture target is the parameter family: OptiTrack flies the real
+// parameter set and HIL the simulation one.
+const REAL_PARAMETER_PROFILES = new Set(["real", "opti_track"]);
+
 function captureCommand(manifest: ConfigurationManifest, snapshot: SnapshotSummary): string {
-  const profile = manifest.status?.tuning_runtime_profile === "real" ? "real" : "sim";
+  const profile = REAL_PARAMETER_PROFILES.has(manifest.status?.tuning_runtime_profile ?? "") ? "real" : "sim";
   return `iii config capture pull --target ${profile} --snapshot ${snapshot.snapshot_id} --name NAME --description DESCRIPTION`;
 }
 

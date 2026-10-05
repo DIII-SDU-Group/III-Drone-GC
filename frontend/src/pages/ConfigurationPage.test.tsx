@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigurationManifest } from "../generated/contracts";
@@ -205,14 +205,61 @@ describe("ConfigurationPage", () => {
     });
   });
 
-  it("routes sealed capture to the GC-host CLI and keeps load/default press-and-hold", () => {
+  it("downloads a snapshot's YAML from the runtime under its file name", async () => {
+    const content = "/**:\n  ros__parameters:\n    /control/example: 1.0\n";
+    const dispatchCommand = vi.fn().mockResolvedValue({
+      ...accepted("configuration.snapshot.download"),
+      result: { snapshot: { snapshot_id: "snapshots/tuned.yaml", content, content_sha256: "sha" } },
+    });
+    const blobs: Blob[] = [];
+    const savedFileNames: string[] = [];
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      blobs.push(blob);
+      return "blob:snapshot";
+    });
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      savedFileNames.push(this.download);
+    });
+    try {
+      render(<ConfigurationPage state={state()} dispatchCommand={dispatchCommand} />);
+
+      expect(screen.queryByText("Capture on GC host")).not.toBeInTheDocument();
+      fireEvent.click(screen.getAllByRole("button", { name: "Download" })[1]);
+
+      await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+      expect(dispatchCommand).toHaveBeenCalledWith("configuration.snapshot.download", { snapshot_id: "snapshots/tuned.yaml" });
+      expect(savedFileNames).toEqual(["tuned.yaml"]);
+      expect(blobs[0].type).toBe("application/x-yaml");
+      expect(await blobs[0].text()).toBe(content);
+    } finally {
+      click.mockRestore();
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it("reports a snapshot download without YAML content instead of saving a file", async () => {
+    const dispatchCommand = vi.fn().mockResolvedValue(accepted("configuration.snapshot.download"));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    try {
+      render(<ConfigurationPage state={state()} dispatchCommand={dispatchCommand} />);
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Download" })[0]);
+
+      expect(await screen.findByText(/returned no YAML content/)).toBeInTheDocument();
+      expect(click).not.toHaveBeenCalled();
+    } finally {
+      click.mockRestore();
+    }
+  });
+
+  it("keeps load and set-default press-and-hold", () => {
     vi.useFakeTimers();
     const dispatchCommand = vi.fn().mockResolvedValue(accepted("configuration.snapshot.load"));
     render(<ConfigurationPage state={state()} dispatchCommand={dispatchCommand} />);
-
-    expect(screen.getAllByText("Capture on GC host").length).toBe(2);
-    expect(screen.getByText(/--snapshot snapshots\/tuned.yaml/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Download" })).not.toBeInTheDocument();
 
     fireEvent.pointerDown(screen.getAllByRole("button", { name: "Load" })[1]);
     act(() => vi.advanceTimersByTime(1500));
@@ -227,19 +274,7 @@ describe("ConfigurationPage", () => {
     expect(screen.getByText("Setting a default while runtime is active affects the next load or restart.")).toBeInTheDocument();
   });
 
-  it("captures with the parameter family of the runtime profile", () => {
-    for (const [runtimeProfile, target] of [["real", "real"], ["opti_track", "real"], ["hil", "sim"], ["sim", "sim"]]) {
-      const profiled = state();
-      const manifest = profiled.domains.configuration!.latest!.manifest as { status: Record<string, unknown> };
-      manifest.status.tuning_runtime_profile = runtimeProfile;
-      const { unmount } = render(<ConfigurationPage state={profiled} dispatchCommand={vi.fn()} />);
-
-      expect(screen.getByText(/--snapshot snapshots\/tuned.yaml/)).toHaveTextContent(`--target ${target} `);
-      unmount();
-    }
-  });
-
-  it("disables writes in Mission mode while local capture guidance remains available", () => {
+  it("disables writes in Mission mode while snapshot downloads remain available", () => {
     const dispatchCommand = vi.fn();
     render(
       <ConfigurationPage
@@ -251,7 +286,9 @@ describe("ConfigurationPage", () => {
     expect(screen.getAllByText("configuration writes are disabled in Mission mode").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Save snapshot" })).toBeDisabled();
 
-    expect(screen.getByText(/--snapshot tracked\/default.yaml/)).toBeInTheDocument();
+    for (const download of screen.getAllByRole("button", { name: "Download" })) {
+      expect(download).toBeEnabled();
+    }
     expect(dispatchCommand).not.toHaveBeenCalled();
   });
 

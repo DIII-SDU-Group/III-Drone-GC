@@ -62,6 +62,31 @@ export function ConfigurationPage({
     }
   }
 
+  async function downloadSnapshot(snapshot: SnapshotSummary) {
+    const response = await run(
+      "configuration.snapshot.download",
+      { snapshot_id: snapshot.snapshot_id },
+      `Snapshot ${snapshot.label} downloaded`,
+    );
+    if (!response?.accepted) {
+      return;
+    }
+    const content = downloadedSnapshotContent(response);
+    if (content === null) {
+      setToasts((current) => [
+        ...current,
+        {
+          id: `${response.request_id}-content`,
+          severity: "danger",
+          title: "Download failed",
+          message: `Snapshot ${snapshot.label} returned no YAML content`,
+        },
+      ]);
+      return;
+    }
+    saveTextFile(snapshotFileName(snapshot.snapshot_id), content, "application/x-yaml");
+  }
+
   async function applyKeys(keys: string[]) {
     const edits = keys.map((key) => staged[key]).filter(Boolean);
     const validEdits = edits.filter((edit) => !validationError(edit.parameter, edit.valueText));
@@ -302,10 +327,9 @@ export function ConfigurationPage({
                   {snapshot.is_default ? <span>default</span> : null}
                 </div>
               </div>
-              <div className="snapshot-capture-action">
-                <strong>Capture on GC host</strong>
-                <code>{captureCommand(manifest, snapshot)}</code>
-              </div>
+              <DisabledControl reason={readDisabledReason}><button type="button" disabled={Boolean(readDisabledReason)} onClick={() => void downloadSnapshot(snapshot)}>
+                Download
+              </button></DisabledControl>
               <PressAndHoldButton
                 label="Load"
                 disabledReason={writeDisabledReason}
@@ -337,13 +361,29 @@ function mirrorStatusLabel(manifest: ConfigurationManifest): string {
   return "not required until the first tuning capture";
 }
 
-// The capture target is the parameter family: OptiTrack flies the real
-// parameter set and HIL the simulation one.
-const REAL_PARAMETER_PROFILES = new Set(["real", "opti_track"]);
+function downloadedSnapshotContent(response: CommandResponse): string | null {
+  const snapshot = response.result?.snapshot;
+  if (!snapshot || typeof snapshot !== "object") {
+    return null;
+  }
+  const content = (snapshot as { content?: unknown }).content;
+  return typeof content === "string" ? content : null;
+}
 
-function captureCommand(manifest: ConfigurationManifest, snapshot: SnapshotSummary): string {
-  const profile = REAL_PARAMETER_PROFILES.has(manifest.status?.tuning_runtime_profile ?? "") ? "real" : "sim";
-  return `iii config capture pull --target ${profile} --snapshot ${snapshot.snapshot_id} --name NAME --description DESCRIPTION`;
+// Snapshot ids are parameter-file paths on the aircraft; save under the file name.
+function snapshotFileName(snapshotId: string): string {
+  const name = snapshotId.split("/").filter(Boolean).pop() || "snapshot";
+  return /\.ya?ml$/.test(name) ? name : `${name}.yaml`;
+}
+
+function saveTextFile(fileName: string, content: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  // Revoke only after the click has handed the file to the browser.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function configurationManifest(state: RuntimeStoreState): ConfigurationManifest {

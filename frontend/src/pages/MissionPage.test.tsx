@@ -519,6 +519,41 @@ describe("MissionPage", () => {
     expect(screen.getByRole("heading", { name: "Battery" })).toBeInTheDocument();
   });
 
+  it("offers Proceed only while the OptiTrack cycle waits in its takeoff mode", () => {
+    const state = readyState();
+    state.domains.system!.capabilities = { profile: "opti_track", cable_intents_available: false, overviews_available: false };
+    state.domains.mission!.latest = { owned_mode: "ot_cycle_takeoff" };
+    state.domains.mission!.mission_state = "active";
+    state.domains.mission!.modes = [
+      { mode_key: "ot_cycle_takeoff", display_name: "OT Takeoff", mode_id: 30, registered: true, active: true, tree_running: true, tree_finished: false, freshness: "fresh" },
+      { mode_key: "ot_cycle_shuttle", display_name: "OT Shuttle", mode_id: 31, registered: true, active: false, tree_running: false, tree_finished: false, freshness: "fresh" },
+    ];
+    state.domains.mission!.intents = [{
+      intent_key: "opti_track.proceed",
+      label: "Proceed",
+      service_name: "/mission/opti_track/proceed",
+      flag_name: "opti_track.proceed",
+      value: false,
+      sequence_id: 0,
+      lifecycle: "cleared",
+    }];
+    const dispatchCommand = vi.fn().mockResolvedValue({ accepted: true, request_id: "proceed-1", command_id: "mission.proceed" });
+    const view = render(<MissionPage state={state} dispatchCommand={dispatchCommand} />);
+
+    expect(screen.getByText("Cable intent control is not available in the opti_track profile.")).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Proceed" }));
+    act(() => vi.advanceTimersByTime(1500));
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.proceed", { value: true });
+
+    state.domains.mission!.modes = state.domains.mission!.modes!.map((mode) => ({
+      ...mode,
+      active: mode.mode_key === "ot_cycle_shuttle",
+      tree_running: mode.mode_key === "ot_cycle_shuttle",
+    }));
+    view.rerender(<MissionPage state={{ ...state }} dispatchCommand={dispatchCommand} />);
+    expect(screen.queryByRole("button", { name: "Proceed" })).not.toBeInTheDocument();
+  });
+
   it("starts the aircraft system with the runtime's own profile", () => {
     const state = readyState();
     state.domains.system = { booted: false, active: false, freshness: "fresh", latest: {}, capabilities: { profile: "opti_track" } };

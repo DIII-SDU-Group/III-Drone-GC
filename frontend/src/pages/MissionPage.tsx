@@ -303,14 +303,15 @@ export function MissionPage({
 
       <section className="workflow-section">
         <div className="workflow-section__heading"><h3>Mission Intent</h3><span>{activeMode?.display_name ?? "inactive"}</span></div>
-        {intentRestriction ? <p className="control-reason" role="note">{intentRestriction}</p> : (
-          <div className="mission-intents">
-            {activeMode?.mode_key === "inspection_demo" ? <MissionIntent label="Recharge now" command="mission.recharge_now" state={mission?.intents?.find((item) => item.intent_key === "trigger_recharge_now")?.lifecycle} run={run} /> : null}
-            {activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Stay on cable" command="mission.stay_on_cable" state={mission?.intents?.find((item) => item.intent_key === "stay_on_cable")?.lifecycle} run={run} /> : null}
-            {activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Leave cable now" command="mission.leave_cable_now" state={mission?.intents?.find((item) => item.intent_key === "interrupt_recharging_now")?.lifecycle} run={run} /> : null}
-            {!activeMode ? <p>No mission intent is available while the inspection mission is inactive.</p> : null}
-          </div>
-        )}
+        {intentRestriction ? <p className="control-reason" role="note">{intentRestriction}</p> : null}
+        <div className="mission-intents">
+          {!intentRestriction && activeMode?.mode_key === "inspection_demo" ? <MissionIntent label="Recharge now" command="mission.recharge_now" state={mission?.intents?.find((item) => item.intent_key === "trigger_recharge_now")?.lifecycle} run={run} /> : null}
+          {!intentRestriction && activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Stay on cable" command="mission.stay_on_cable" state={mission?.intents?.find((item) => item.intent_key === "stay_on_cable")?.lifecycle} run={run} /> : null}
+          {!intentRestriction && activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Leave cable now" command="mission.leave_cable_now" state={mission?.intents?.find((item) => item.intent_key === "interrupt_recharging_now")?.lifecycle} run={run} /> : null}
+          {/* The OptiTrack cycle hovers after takeoff until the operator proceeds. */}
+          {activeMode?.mode_key === "ot_cycle_takeoff" ? <MissionIntent label="Proceed" command="mission.proceed" state={mission?.intents?.find((item) => item.intent_key === "opti_track.proceed")?.lifecycle} run={run} /> : null}
+          {!activeMode ? <p>No mission intent is available while the inspection mission is inactive.</p> : null}
+        </div>
         {activeIntents.length ? <ol className="intent-history" aria-label="Mission intent lifecycle">{activeIntents.map((intent) => <li key={intent.intent_key}><strong>{intent.label}</strong><span>{intentLifecycleLabel(intent.lifecycle ?? "cleared")}</span>{intent.detail ? <small>{intent.detail}</small> : null}</li>)}</ol> : null}
       </section>
 

@@ -40,8 +40,8 @@ commands into runtime API domains/pages instead.
   complete inspection/recharge/resume acceptance cycle.
 - `docs/gui-v2-real-profile-acceptance.md`: staged signed real-aircraft
   inspection acceptance record.
-- `docs/gui-v2-security-checklist.md`: trusted-operator-network security
-  checklist and deferred TLS work.
+- `docs/gui-v2-security-checklist.md`: the developer-access decision (no
+  authentication, tokens, or firewall rules).
 - `docs/gui-v2-risk-register.md`: completion gate for GUI v2 open risks,
   owner tasks, evidence, and final acceptance checks.
 

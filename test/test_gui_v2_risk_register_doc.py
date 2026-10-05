@@ -8,7 +8,7 @@ REQUIRED_RISKS = [
     "runtime API bootstrap/systemd permissions",
     "remote CLI migration away from SSH command forwarding",
     "mDNS blocking and manual endpoint fallback",
-    "browser password/CLI token security and TLS/trusted-network decision",
+    "unauthenticated developer access (no password, CLI token, TLS, or firewall)",
     "PX4 MAVLink/MAVSDK availability over FCU Ethernet",
     "fused PX4/ROS fail-closed state",
     "required typed ROS health/status topics",

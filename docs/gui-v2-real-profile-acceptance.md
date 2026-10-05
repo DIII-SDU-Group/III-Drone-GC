@@ -73,7 +73,6 @@ safety justification.
 
 - [ ] Operator confirms the prominent aircraft ID, runtime ID, and real profile
   before login; a mismatched identity is rejected.
-- [ ] A second browser session is rejected while the operator lease is fresh.
 - [ ] Dashboard, Mission, Flight, Payload, Perception, Map, Configuration,
   Rosbags, and Logs show fresh typed state or an explicit unavailable reason.
 - [ ] Dangerous runtime mutations blocked while armed/in-flight/unknown are

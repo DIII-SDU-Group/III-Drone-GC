@@ -15,7 +15,8 @@ against the sim profile.
 - Devcontainer is running with ROS Jazzy sourced for runtime work.
 - `iii-runtime-api` is reachable at `http://127.0.0.1:8765`.
 - Runtime API identity reports `"profile": "sim"`.
-- Browser password is the sim/dev password, default `dev-password`.
+- The GUI login step accepts any password (developer access); the script sends
+  `dev-password` by default.
 - Docker is available on the host if the script should start the GC stack.
 
 Recommended runtime bringup inside the devcontainer:
@@ -44,7 +45,7 @@ The script:
 - verifies frontend, GC proxy, and runtime API reachability.
 - discovers the runtime through the proxy and adds a manual local endpoint.
 - validates and selects the runtime target.
-- authenticates through `/proxy/session/login`.
+- opens a session through `/proxy/session/login` (any password is accepted).
 - reads dashboard/workflow state domains:
   - runtime/system/subsystems.
   - vehicle/control/mission/operation.
@@ -226,7 +227,7 @@ Open `http://127.0.0.1:5174` and verify:
 - Payload, Perception, Configuration, Rosbags, Logs, and Map pages render
   their current state without ROS/DDS on the GC side.
 - disconnect/reconnect does not queue commands; commands stay disabled until a
-  runtime is selected and authenticated again.
+  runtime is selected and its session reopened.
 
 Stop the stack when done:
 

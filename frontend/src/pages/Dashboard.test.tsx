@@ -104,4 +104,39 @@ describe("Dashboard", () => {
     expect(payloadPanel).toHaveClass("diagnostic-panel--missing");
     expect(within(payloadPanel).getAllByText("unknown").length).toBeGreaterThan(0);
   });
+
+  it("shows external vision instead of the surfaces an opti_track profile lacks", () => {
+    const optiTrack = state();
+    optiTrack.domains.system = {
+      ...optiTrack.domains.system,
+      capabilities: { profile: "opti_track", payload_available: false, perception_available: false, overviews_available: false },
+    };
+    optiTrack.domains.vehicle = {
+      ...optiTrack.domains.vehicle,
+      external_vision: {
+        ready: true,
+        freshness: "fresh",
+        relay_level: "ok",
+        relay_freshness: "fresh",
+        relay_stale: false,
+        input_rate_hz: 120,
+        ev_pos_fused: true,
+        ev_hgt_fused: true,
+        ev_yaw_fused: true,
+        fusion_freshness: "fresh",
+        origin_valid: true,
+        origin_freshness: "fresh",
+      },
+    };
+
+    render(<Dashboard state={optiTrack} />);
+
+    const vision = screen.getByRole("heading", { name: "External Vision" }).closest("section") as HTMLElement;
+    expect(vision).toHaveClass("diagnostic-panel--fresh");
+    expect(vision).toHaveTextContent("120 Hz");
+    expect(vision).toHaveTextContent("position fused, height fused, yaw fused (fresh)");
+    for (const heading of ["Perception and Powerline", "Payload", "Map and Geometry"]) {
+      expect(screen.queryByRole("heading", { name: heading })).not.toBeInTheDocument();
+    }
+  });
 });

@@ -83,6 +83,17 @@ describe("PayloadPage", () => {
     expect(screen.getByRole("button", { name: "Close gripper" })).toHaveAccessibleDescription("gripper commands are disabled while a custom operation action is active");
   });
 
+  it("disables gripper controls with the reason when the profile has no payload", () => {
+    const restricted = state();
+    restricted.domains.system = { capabilities: { profile: "opti_track", payload_available: false } };
+    render(<PayloadPage state={restricted} dispatchCommand={vi.fn()} />);
+
+    const reason = "Payload control is not available in the opti_track profile.";
+    expect(screen.getByRole("note")).toHaveTextContent(reason);
+    expect(screen.getByRole("button", { name: "Open gripper" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Close gripper" })).toHaveAccessibleDescription(reason);
+  });
+
   it("shows command rejections", async () => {
     const dispatchCommand = vi.fn().mockResolvedValue({
       request_id: "close-1",

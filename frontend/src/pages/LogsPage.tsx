@@ -98,7 +98,7 @@ export function LogsPage({
       <div className="workflow-page logs-page">
         <section className="workflow-section">
           <h3>Logs</h3>
-          <p className="control-reason">Login required to access runtime logs.</p>
+          <p className="control-reason">Connect to a runtime to access its logs.</p>
         </section>
       </div>
     );

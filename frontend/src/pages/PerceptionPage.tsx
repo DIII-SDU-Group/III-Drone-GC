@@ -3,7 +3,7 @@ import { useState } from "react";
 import { DisabledControl, MapView, PressAndHoldButton, ToastRegion, type CommandResult, type ToastMessage } from "../components";
 import type { RuntimeCommandDispatcher } from "../api/commands";
 import type { CommandResponse } from "../generated/contracts";
-import type { RuntimeStoreState } from "../state";
+import { profileSurfaceUnavailableReason, type RuntimeStoreState } from "../state";
 
 const PL_MAPPER_COMMANDS = [
   { id: "perception.pl_mapper.start", label: "Start mapper" },
@@ -26,6 +26,9 @@ export function PerceptionPage({
   const [replacementSlot, setReplacementSlot] = useState<number | null>(null);
   const [approvedAt, setApprovedAt] = useState<string | null>(() => localStorage.getItem(APPROVAL_KEY));
   const disabledReason = perceptionDisabledReason(state);
+  const perceptionRestriction = profileSurfaceUnavailableReason(state, "perception");
+  const overviewRestriction = profileSurfaceUnavailableReason(state, "overviews");
+  const overviewDisabledReason = overviewRestriction ?? disabledReason;
 
   async function run(commandId: string, parameters?: Record<string, unknown>) {
     try {
@@ -57,6 +60,9 @@ export function PerceptionPage({
 
   return (
     <div className="workflow-page perception-page">
+      {[perceptionRestriction, overviewRestriction].filter(Boolean).map((reason) => (
+        <p className="control-reason profile-restriction" role="note" key={reason}>{reason}</p>
+      ))}
       <section className="workflow-section">
         <h3>Perception Status</h3>
         <dl className="status-list">
@@ -109,15 +115,15 @@ export function PerceptionPage({
                   <p>{endpoint ? `x ${endpoint.x.toFixed(2)} m, y ${endpoint.y.toFixed(2)} m` : "Not captured"}</p>
                 </div>
                 {endpoint && !replacing ? (
-                  <DisabledControl reason={disabledReason}>
-                  <button type="button" disabled={Boolean(disabledReason)} onClick={() => setReplacementSlot(slot)}>
+                  <DisabledControl reason={overviewDisabledReason}>
+                  <button type="button" disabled={Boolean(overviewDisabledReason)} onClick={() => setReplacementSlot(slot)}>
                     Replace endpoint
                   </button>
                   </DisabledControl>
                 ) : (
                   <PressAndHoldButton
                     label={replacing ? "Confirm replace" : "Capture endpoint"}
-                    disabledReason={disabledReason}
+                    disabledReason={overviewDisabledReason}
                     onConfirm={() => {
                       void run("pylon.capture_current", { pylon_id: slot, replace_existing: replacing });
                       setReplacementSlot(null);
@@ -132,7 +138,7 @@ export function PerceptionPage({
         <p className="control-hint">Capture samples the current onboard aircraft position after the low-speed dwell; coordinates cannot be edited here.</p>
         <PressAndHoldButton
           label="Clear pylon overview"
-          disabledReason={disabledReason ?? ((pylonOverview?.pylon_count ?? 0) === 0 ? "No pylon endpoints are stored." : undefined)}
+          disabledReason={overviewDisabledReason ?? ((pylonOverview?.pylon_count ?? 0) === 0 ? "No pylon endpoints are stored." : undefined)}
           onConfirm={() => void run("pylon.overview.clear")}
         />
       </section>
@@ -201,7 +207,7 @@ export function PerceptionPage({
           </label>
           <PressAndHoldButton
             label="Store approved overview"
-            disabledReason={disabledReason ?? (!captureReady ? captureRejections.join("; ") || "Capture readiness is unknown." : undefined)}
+            disabledReason={overviewDisabledReason ?? (!captureReady ? captureRejections.join("; ") || "Capture readiness is unknown." : undefined)}
             onConfirm={() => void run("powerline.overview.update", { timeout_s: overviewTimeoutS })}
           />
         </div>
@@ -282,6 +288,10 @@ function SourceBlock({ title, rows }: { title: string; rows: Array<[string, stri
 }
 
 function perceptionDisabledReason(state: RuntimeStoreState): string | undefined {
+  const profileRestriction = profileSurfaceUnavailableReason(state, "perception");
+  if (profileRestriction) {
+    return profileRestriction;
+  }
   if (state.connection.commands_disabled_reason) {
     return state.connection.commands_disabled_reason;
   }

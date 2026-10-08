@@ -125,6 +125,20 @@ describe("AppShell", () => {
     expect(document.querySelector(".operator-console")).toHaveAttribute("data-min-viewport", "1440x900");
   });
 
+  it("does not count the surfaces a profile lacks as dashboard issues", () => {
+    const optiTrack = state();
+    optiTrack.domains.perception = { freshness: "unknown", source_availability: "unavailable", degraded_reason: "perception status topics have not been received" };
+    optiTrack.domains.powerline = { freshness: "unknown", source_availability: "unavailable", degraded_reason: "powerline status topics have not been received" };
+    optiTrack.domains.payload = { freshness: "unknown", source_availability: "unavailable", degraded_reason: "payload status topics have not been received" };
+    const { rerender } = renderAppShell({ state: optiTrack });
+    expect(screen.getByRole("status")).toHaveTextContent("3 issues");
+
+    optiTrack.domains.system = { ...optiTrack.domains.system, capabilities: { profile: "opti_track", payload_available: false, perception_available: false } };
+    rerender(<AppShell state={optiTrack} onHold={() => accepted("px4.hold")} onCancelOperation={() => accepted("custom_operation.cancel")} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Live status");
+  });
+
   it("labels configuration unchanged when no edits are pending", () => {
     const unchanged = state();
     unchanged.domains.configuration!.pending_edits = false;

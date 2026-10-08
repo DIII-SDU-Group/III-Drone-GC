@@ -15,7 +15,7 @@ against the sim profile.
 - Devcontainer is running with ROS Jazzy sourced for runtime work.
 - `iii-runtime-api` is reachable at `http://127.0.0.1:8765`.
 - Runtime API identity reports `"profile": "sim"`.
-- Browser password is the sim/dev password, default `dev-password`.
+- The GUI connects without a password (developer access).
 - Docker is available on the host if the script should start the GC stack.
 
 Recommended runtime bringup inside the devcontainer:
@@ -44,7 +44,7 @@ The script:
 - verifies frontend, GC proxy, and runtime API reachability.
 - discovers the runtime through the proxy and adds a manual local endpoint.
 - validates and selects the runtime target.
-- authenticates through `/proxy/session/login`.
+- opens a session through `/proxy/session/login` (no password).
 - reads dashboard/workflow state domains:
   - runtime/system/subsystems.
   - vehicle/control/mission/operation.
@@ -170,8 +170,20 @@ scripts/workspace/gui_v2_sim_e2e_smoke.py \
 ```
 
 This automated staging is simulation-only. The real workflow in
-[`docs/field-inspection-operations.md`](../../../docs/field-inspection-operations.md)
+the workspace
+[`field-inspection-operations.md`](https://github.com/DIII-SDU-Group/III-Drone-ros2-ws/blob/main/docs/field-inspection-operations.md)
 uses manual RC/QGroundControl positioning and current-position GUI captures.
+
+Runtime lifecycle operations can legitimately take close to the proxy's
+180-second operation budget while ROS lifecycle nodes settle. The runner's
+per-request timeout therefore defaults to 190 seconds. A shorter
+`--http-timeout-s` is appropriate only for deliberately testing unknown-outcome
+recovery; it is not the field acceptance setting.
+
+The reversible configuration round trip retries only typed, explicitly
+retryable rejections for up to 60 seconds. This covers the brief ROS service
+rediscovery window after `runtime.start`; non-retryable validation or safety
+rejections still fail immediately.
 
 ## Fault Acceptance Matrix
 
@@ -181,13 +193,13 @@ injection merely to exercise presentation logic.
 
 | Fault | Executable evidence | Required result |
 | --- | --- | --- |
-| Stale pose, bad GPS, lost perception, ineligible geometry | [`test_inspection_fault_acceptance.py`](../../III-Drone-Runtime/test/test_inspection_fault_acceptance.py) | Activation rejects before a mode request and retains the typed reason. |
-| Live mode-ID change | [`test_flight_commands.py`](../../III-Drone-Runtime/test/test_flight_commands.py) | Transition becomes a degraded conflict and never claims Mission ownership. |
-| Mission activation timeout | [`test_inspection_fault_acceptance.py`](../../III-Drone-Runtime/test/test_inspection_fault_acceptance.py) | Timeout remains explicit and does not claim Mission ownership. |
-| Browser disconnect or lease expiry | [`commands.test.ts`](../frontend/src/api/commands.test.ts), [`runtimeStore.test.ts`](../frontend/src/state/runtimeStore.test.ts), and [`test_browser_session.py`](../../III-Drone-Runtime/test/test_browser_session.py) | State becomes stale, mutations disable, and no command is queued or replayed. |
-| Runtime restart | [`test_inspection_fault_acceptance.py`](../../III-Drone-Runtime/test/test_inspection_fault_acceptance.py) and [`test_mission_status.py`](../../III-Drone-Runtime/test/test_mission_status.py) | Fresh snapshot reconstructs the onboard phase without reacquiring control. |
-| Charger status failure | [`test_inspection_fault_acceptance.py`](../../III-Drone-Runtime/test/test_inspection_fault_acceptance.py) | A persistent stop-required charging failure names payload evidence and recovery action. |
-| External RC/QGroundControl takeover | [`test_inspection_fault_acceptance.py`](../../III-Drone-Runtime/test/test_inspection_fault_acceptance.py) and [`test_flight_commands.py`](../../III-Drone-Runtime/test/test_flight_commands.py) | Hold/Position ownership is retained; autonomy is terminated and never automatically reacquired. |
+| Stale pose, bad GPS, lost perception, ineligible geometry | Runtime [`test_inspection_fault_acceptance.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_inspection_fault_acceptance.py) | Activation rejects before a mode request and retains the typed reason. |
+| Live mode-ID change | Runtime [`test_flight_commands.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_flight_commands.py) | Transition becomes a degraded conflict and never claims Mission ownership. |
+| Mission activation timeout | Runtime [`test_inspection_fault_acceptance.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_inspection_fault_acceptance.py) | Timeout remains explicit and does not claim Mission ownership. |
+| Browser disconnect or lease expiry | [`commands.test.ts`](../frontend/src/api/commands.test.ts), [`runtimeStore.test.ts`](../frontend/src/state/runtimeStore.test.ts), and Runtime [`test_browser_session.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_browser_session.py) | State becomes stale, mutations disable, and no command is queued or replayed. |
+| Runtime restart | Runtime [`test_inspection_fault_acceptance.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_inspection_fault_acceptance.py) and [`test_mission_status.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_mission_status.py) | Fresh snapshot reconstructs the onboard phase without reacquiring control. |
+| Charger status failure | Runtime [`test_inspection_fault_acceptance.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_inspection_fault_acceptance.py) | A persistent stop-required charging failure names payload evidence and recovery action. |
+| External RC/QGroundControl takeover | Runtime [`test_inspection_fault_acceptance.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_inspection_fault_acceptance.py) and [`test_flight_commands.py`](https://github.com/DIII-SDU-Group/III-Drone-Runtime/blob/main/test/test_flight_commands.py) | Hold/Position ownership is retained; autonomy is terminated and never automatically reacquired. |
 | Gazebo command or maneuver failure | This runner's failure artifacts and recovery path | Rejection/result context is retained, Hold is requested, and an airborne vehicle is landed. |
 
 Every runner invocation uses a unique request-ID namespace. Repeating the test
@@ -214,7 +226,7 @@ Open `http://127.0.0.1:5174` and verify:
 - Payload, Perception, Configuration, Rosbags, Logs, and Map pages render
   their current state without ROS/DDS on the GC side.
 - disconnect/reconnect does not queue commands; commands stay disabled until a
-  runtime is selected and authenticated again.
+  runtime is selected and its session reopened.
 
 Stop the stack when done:
 

@@ -1,6 +1,7 @@
 import { MapView } from "../components";
+import { externalVisionRows, externalVisionStatus } from "../format/externalVision";
 import type { MapState } from "../generated/contracts";
-import type { RuntimeStoreState } from "../state";
+import { profileSurfaceUnavailableReason, type RuntimeStoreState } from "../state";
 
 export type DashboardProps = {
   state: RuntimeStoreState;
@@ -85,8 +86,13 @@ function dashboardCategories(
   const payload = state.domains.payload;
   const configuration = state.domains.configuration;
   const rosbag = state.domains.rosbag;
+  // A profile without perception or payload (opti_track) has nothing to show
+  // there; an aircraft positioning from motion capture shows that instead.
+  const perceptionAbsent = Boolean(profileSurfaceUnavailableReason(state, "perception"));
+  const payloadAbsent = Boolean(profileSurfaceUnavailableReason(state, "payload"));
+  const vision = vehicle?.external_vision;
 
-  return [
+  const categories: Array<Category | null> = [
     {
       title: "Runtime",
       status: domainStatus(system),
@@ -122,7 +128,16 @@ function dashboardCategories(
         { label: "Type", value: operation?.active_operation_type ?? "none" },
       ],
     },
-    {
+    vision
+      ? {
+          title: "External Vision",
+          status: externalVisionStatus(vision),
+          rows: externalVisionRows(vision).filter((row) =>
+            ["Pose relay", "Input rate", "PX4 vision fusion", "EKF origin"].includes(row.label),
+          ),
+        }
+      : null,
+    perceptionAbsent ? null : {
       title: "Perception and Powerline",
       status: degradedStatus([perception, powerline]),
       rows: [
@@ -132,7 +147,7 @@ function dashboardCategories(
         { label: "Live perception", value: powerline?.live_perception_status ?? "unknown" },
       ],
     },
-    {
+    payloadAbsent ? null : {
       title: "Payload",
       status: domainStatus(payload),
       rows: [
@@ -159,7 +174,7 @@ function dashboardCategories(
         { label: "Badge", value: configBadge(configuration) },
       ],
     },
-    {
+    perceptionAbsent ? null : {
       title: "Map and Geometry",
       status: degradedStatus([powerline, perception]),
       rows: [
@@ -169,6 +184,7 @@ function dashboardCategories(
       ],
     },
   ];
+  return categories.filter((category): category is Category => category !== null);
 }
 
 function domainStatus(domain?: { freshness?: string; source_availability?: string; degraded_reason?: string | null }) {

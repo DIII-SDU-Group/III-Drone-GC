@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from iii_drone_contracts import ApiCompatibility, ApiIdentity
+from iii_drone_contracts import ApiCompatibility, ApiIdentity, ProfileCapabilities
 from iii_drone_gc.v2_proxy.app import GCProxySettings, create_app
 from iii_drone_gc.v2_proxy.discovery import RuntimeDiscoveryService, RuntimeEndpointSummary, StaticDiscoveryProvider
 from iii_drone_gc.v2_proxy.targets import RuntimeTargetManager
@@ -202,3 +202,29 @@ def test_expected_aircraft_and_profile_are_fail_closed_for_manual_endpoint():
 
     assert "expected system_id" in str(exc_info.value)
     assert "expected profile" in str(exc_info.value)
+
+
+def test_opti_track_ground_control_accepts_only_the_pinned_opti_track_runtime():
+    endpoint = _endpoint()
+    discovery = RuntimeDiscoveryService(provider=StaticDiscoveryProvider([endpoint]))
+    discovery.list_runtimes()
+    opti_track = _identity(profile="opti_track", runtime_id="iii-runtime", system_id="iii-drone").model_copy(
+        update={"capabilities": ProfileCapabilities(profile="opti_track", payload_available=False)}
+    )
+
+    def manager(identity):
+        return RuntimeTargetManager(
+            discovery=discovery,
+            identity_client=_FakeIdentityClient({endpoint.base_url: identity}),
+            expected_runtime_id="iii-runtime",
+            expected_system_id="iii-drone",
+            expected_profile="opti_track",
+        )
+
+    validated = manager(opti_track).validate_endpoint(endpoint.endpoint_id)
+    with pytest.raises(ValueError, match="expected profile 'opti_track', got 'real'"):
+        manager(opti_track.model_copy(update={"profile": "real"})).validate_endpoint(endpoint.endpoint_id)
+
+    assert validated.profile == "opti_track"
+    assert validated.runtime_id == "iii-runtime"
+    assert validated.system_id == "iii-drone"

@@ -4,10 +4,17 @@ import type { RuntimeCommandDispatcher } from "../api/commands";
 import { MapView } from "../components/MapView";
 import { PressAndHoldButton, ToastRegion, type CommandResult, type ToastMessage } from "../components";
 import type { CommandResponse, InspectionPreflightItem, MapState } from "../generated/contracts";
-import type { RuntimeStoreState } from "../state";
+import { profileCapabilities, profileSurfaceUnavailableReason, runtimeProfile, type RuntimeStoreState } from "../state";
 
 const APPROVAL_KEY = "iii-drone:inspection:perception-approved-at";
 const PREPARATION_SNAPSHOT_KEY = "iii-drone:inspection:preparation-at-activation";
+const MISSION_CATALOG_SCHEMA = "iii.mission-catalog/v1";
+
+type MissionCatalogEntry = {
+  id: string;
+  classification: string;
+  experimentalWarning: string | null;
+};
 
 export function MissionPage({
   state,
@@ -25,19 +32,46 @@ export function MissionPage({
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [approvedAt] = useState<string | null>(() => localStorage.getItem(APPROVAL_KEY));
   const [systemStartStages, setSystemStartStages] = useState<SystemStartStage[]>([]);
+  const [catalogEntries, setCatalogEntries] = useState<MissionCatalogEntry[]>([]);
+  const [catalogProfile, setCatalogProfile] = useState<string | null>(null);
+  const [pendingCatalogId, setPendingCatalogId] = useState("");
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogMessage, setCatalogMessage] = useState<string | null>(null);
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
+  const [catalogSelecting, setCatalogSelecting] = useState(false);
   const mission = state.domains.mission;
   const vehicle = state.domains.vehicle;
   const system = state.domains.system;
   const activeMode = mission?.modes?.find((mode) => mode.active || mode.tree_running);
   const missionInProgress = mission?.mission_state === "active" || Boolean(activeMode);
   const spec = mission?.specification;
-  const startReason = inspectionStartDisabledReason(state);
+  const ownedModeKey = typeof mission?.latest?.owned_mode === "string" ? mission.latest.owned_mode : undefined;
+  const ownedMode = mission?.modes?.find((mode) => mode.mode_key === ownedModeKey);
+  const startReason = missionStartDisabledReason(state, ownedModeKey);
+  // A mission the runtime lets start from a disarmed, landed aircraft arms it.
+  const startArms =
+    !startReason && profileCapabilities(state)?.disarmed_mission_activation === true && vehicle?.armed === false && vehicle?.in_air === false;
+  const startLabel = startArms
+    ? `Arm and start ${ownedMode?.display_name ?? "Mission"}`
+    : ownedModeKey === "inspection_demo" ? "Start Inspection" : `Start ${ownedMode?.display_name ?? "Mission"}`;
   const phaseDetail = missionPhaseDetail(mission);
   const trajectory = mapState?.trajectory;
   const activeIntents = mission?.intents?.filter((intent) => intent.lifecycle !== "cleared") ?? [];
   const livePreparation = preparationEvidence(state, approvedAt);
   const livePreparationKey = JSON.stringify(livePreparation);
   const preparation = missionInProgress ? loadPreparationSnapshot() ?? livePreparation : livePreparation;
+  const runtimeProfile = missionCatalogProfile(spec?.active_profile, systemProfile(state));
+  const selectionProfile = catalogProfile ?? runtimeProfile;
+  const selectedCatalog = catalogEntries.find((entry) => entry.id === pendingCatalogId);
+  const catalogMutationReason = missionCatalogMutationDisabledReason(state, selectionProfile, catalogSelecting);
+  // A profile without overviews (opti_track) has no inspection preparation;
+  // one without payload has no charger; one without a cable has no intents.
+  const overviewRestriction = profileSurfaceUnavailableReason(state, "overviews");
+  const payloadRestriction = profileSurfaceUnavailableReason(state, "payload");
+  const intentRestriction = profileSurfaceUnavailableReason(state, "cable_intents");
+  const applyCatalogReason = catalogMutationReason
+    ?? (catalogEntries.length === 0 ? "Refresh installed missions before selecting one." : undefined)
+    ?? (!pendingCatalogId ? "Select a compatible installed mission." : undefined);
 
   useEffect(() => {
     if (missionInProgress) return;
@@ -55,6 +89,64 @@ export function MissionPage({
     } catch (error) {
       const result = errorToResult(commandId, error);
       setToasts((current) => [...current, result]);
+    }
+  }
+
+  async function refreshMissionCatalog() {
+    setCatalogError(null);
+    setCatalogMessage(null);
+    setCatalogRefreshing(true);
+    try {
+      const response = await dispatchCommand("mission.catalog.list", { all: false });
+      if (!response.accepted) {
+        const message = commandResponseMessage(response);
+        setCatalogEntries([]);
+        setCatalogProfile(null);
+        setPendingCatalogId("");
+        setCatalogError(message);
+        setToasts((current) => [...current, commandResponseToResult(response)]);
+        return;
+      }
+      const catalog = readMissionCatalog(response.result, runtimeProfile);
+      setCatalogEntries(catalog.entries);
+      setCatalogProfile(catalog.profile);
+      setPendingCatalogId((current) => current && catalog.entries.some((entry) => entry.id === current)
+        ? current
+        : catalog.entries.find((entry) => entry.id === spec?.catalog_id)?.id ?? catalog.entries[0]?.id ?? "");
+      setCatalogMessage(response.message ?? "Installed compatible missions refreshed.");
+      setToasts((current) => [...current, { ...commandResponseToResult(response), autoDismissMs: 2400 }]);
+    } catch (error) {
+      const result = errorToResult("mission.catalog.list", error);
+      setCatalogEntries([]);
+      setCatalogProfile(null);
+      setPendingCatalogId("");
+      setCatalogError(result.message);
+      setToasts((current) => [...current, result]);
+    } finally {
+      setCatalogRefreshing(false);
+    }
+  }
+
+  async function selectMissionCatalog(parameters: Record<string, unknown>) {
+    setCatalogError(null);
+    setCatalogMessage(null);
+    setCatalogSelecting(true);
+    try {
+      const response = await dispatchCommand("mission.catalog.select", parameters);
+      if (!response.accepted) {
+        const message = commandResponseMessage(response);
+        setCatalogError(message);
+        setToasts((current) => [...current, commandResponseToResult(response)]);
+        return;
+      }
+      setCatalogMessage("Selection accepted. Active catalog remains the current mission status until the runtime reports it.");
+      setToasts((current) => [...current, { ...commandResponseToResult(response), autoDismissMs: 2400 }]);
+    } catch (error) {
+      const result = errorToResult("mission.catalog.select", error);
+      setCatalogError(result.message);
+      setToasts((current) => [...current, result]);
+    } finally {
+      setCatalogSelecting(false);
     }
   }
 
@@ -78,9 +170,9 @@ export function MissionPage({
             onConfirm={() => void run("runtime.system_start", { profile: systemProfile(state) })}
           />
           <PressAndHoldButton
-            label="Start Inspection"
+            label={startLabel}
             disabledReason={startReason}
-            onConfirm={() => void run("mission.activate", { mode_key: "inspection_demo" })}
+            onConfirm={() => void run("mission.activate", { mode_key: ownedModeKey })}
           />
         </div>
       </section>
@@ -98,24 +190,29 @@ export function MissionPage({
       <section aria-label="Preparation" className={missionInProgress ? "workflow-section mission-preparation mission-preparation--frozen" : "workflow-section mission-preparation"} aria-disabled={missionInProgress}>
         <div className="workflow-section__heading">
           <h3>Preparation</h3>
-          <span>{missionInProgress ? "locked at activation" : preparation.eligibility?.eligible && preparation.pylonValid && preparation.storedOverviewValid ? "ready" : "attention required"}</span>
+          <span>{missionInProgress ? "locked at activation" : (overviewRestriction ? preparation.preflight?.ready : preparation.eligibility?.eligible && preparation.pylonValid && preparation.storedOverviewValid) ? "ready" : "attention required"}</span>
         </div>
+        {overviewRestriction ? <p className="control-hint" role="note">{overviewRestriction} The onboard preflight checks positioning instead.</p> : null}
         <ol className="mission-checklist">
           <Check labels={["Aircraft system ready", "Aircraft system not ready", "Aircraft system state unknown"]} value={preparation.systemActive} detail={preparation.systemDegradedReason} />
-          <Check
-            labels={["Perception review acknowledged", "Perception review not acknowledged", "Perception review not acknowledged"]}
-            value={Boolean(preparation.approvedAt)}
-            detail={preparation.approvedAt ? `Acknowledged ${formatTime(preparation.approvedAt)}` : undefined}
-            action={<button type="button" onClick={onOpenPerception}>Review perception</button>}
-          />
-          <Check labels={["Powerline overview stored", "Powerline overview not stored", "Powerline overview state unknown"]} value={preparation.storedOverviewValid} detail={preparation.storedOverviewSource} />
-          <Check labels={["Endpoint 1 captured", "Endpoint 1 not captured", "Endpoint 1 state unknown"]} value={preparation.pylonKnown ? preparation.pylonIds.includes(1) : undefined} />
-          <Check labels={["Endpoint 2 captured", "Endpoint 2 not captured", "Endpoint 2 state unknown"]} value={preparation.pylonKnown ? preparation.pylonIds.includes(2) : undefined} />
-          <Check labels={["Corridor geometry valid", "Corridor geometry invalid", "Corridor geometry state unknown"]} value={preparation.eligibility?.evaluable} />
-          <Check labels={["Eligible inspection start position", "Ineligible inspection start position", "Inspection start position unknown"]} value={preparation.eligibility?.eligible} detail={preparation.eligibility?.failure_reasons?.join("; ")} />
+          {overviewRestriction ? null : (
+            <>
+              <Check
+                labels={["Perception review acknowledged", "Perception review not acknowledged", "Perception review not acknowledged"]}
+                value={Boolean(preparation.approvedAt)}
+                detail={preparation.approvedAt ? `Acknowledged ${formatTime(preparation.approvedAt)}` : undefined}
+                action={<button type="button" onClick={onOpenPerception}>Review perception</button>}
+              />
+              <Check labels={["Powerline overview stored", "Powerline overview not stored", "Powerline overview state unknown"]} value={preparation.storedOverviewValid} detail={preparation.storedOverviewSource} />
+              <Check labels={["Endpoint 1 captured", "Endpoint 1 not captured", "Endpoint 1 state unknown"]} value={preparation.pylonKnown ? preparation.pylonIds.includes(1) : undefined} />
+              <Check labels={["Endpoint 2 captured", "Endpoint 2 not captured", "Endpoint 2 state unknown"]} value={preparation.pylonKnown ? preparation.pylonIds.includes(2) : undefined} />
+              <Check labels={["Corridor geometry valid", "Corridor geometry invalid", "Corridor geometry state unknown"]} value={preparation.eligibility?.evaluable} />
+              <Check labels={["Eligible inspection start position", "Ineligible inspection start position", "Inspection start position unknown"]} value={preparation.eligibility?.eligible} detail={preparation.eligibility?.failure_reasons?.join("; ")} />
+            </>
+          )}
           <Check labels={["Mission ready", "Mission not ready", "Mission readiness unknown"]} value={preparation.preflight?.ready} detail={failedHardPreflightItems(preparation.preflight?.items)?.map((item) => item.label).join("; ")} />
         </ol>
-        {preparation.eligibility ? (
+        {preparation.eligibility && !overviewRestriction ? (
           <dl className="status-list mission-eligibility">
             <div><dt>Side</dt><dd>{preparation.eligibility.side}</dd></div>
             <div><dt>Clearance</dt><dd>{metric(preparation.eligibility.measured_lateral_clearance_m)} / {metric(preparation.eligibility.required_lateral_clearance_m)}</dd></div>
@@ -132,22 +229,63 @@ export function MissionPage({
       </section>
 
       <section className="workflow-section">
-        <div className="workflow-section__heading"><h3>Battery And Charging</h3><span>{mission?.battery_policy?.level ?? "unknown"}</span></div>
+        <div className="workflow-section__heading"><h3>{payloadRestriction ? "Battery" : "Battery And Charging"}</h3><span>{mission?.battery_policy?.level ?? "unknown"}</span></div>
         <dl className="status-list battery-status-list">
           <div><dt>Remaining</dt><dd>{percent(vehicle?.battery_remaining)}</dd></div>
-          <div><dt>Recharge trigger</dt><dd>{mission?.battery_policy?.recharge_imminent == null ? "unknown" : mission.battery_policy.recharge_imminent ? "imminent" : "not reached"}</dd></div>
-          <div><dt>Onboard threshold</dt><dd>{unit(mission?.battery_policy?.recharge_threshold_value, mission?.battery_policy?.recharge_threshold_unit ?? "V")}</dd></div>
-          <div><dt>Charger</dt><dd>{state.domains.payload?.charger_status ?? "unknown"}</dd></div>
-          <div><dt>Gripper</dt><dd>{state.domains.payload?.gripper_status ?? "unknown"}</dd></div>
+          {payloadRestriction ? null : (
+            <>
+              <div><dt>Recharge trigger</dt><dd>{mission?.battery_policy?.recharge_imminent == null ? "unknown" : mission.battery_policy.recharge_imminent ? "imminent" : "not reached"}</dd></div>
+              <div><dt>Onboard threshold</dt><dd>{unit(mission?.battery_policy?.recharge_threshold_value, mission?.battery_policy?.recharge_threshold_unit ?? "V")}</dd></div>
+              <div><dt>Charger</dt><dd>{state.domains.payload?.charger_status ?? "unknown"}</dd></div>
+              <div><dt>Gripper</dt><dd>{state.domains.payload?.gripper_status ?? "unknown"}</dd></div>
+            </>
+          )}
         </dl>
       </section>
 
-      <section className="workflow-section mission-specification">
-        <div className="workflow-section__heading"><h3>Installed Inspection</h3><span>{spec?.canonical_loaded ? "canonical" : "not verified"}</span></div>
+      <section className="workflow-section mission-specification" aria-label="Installed Mission">
+        <div className="workflow-section__heading"><h3>Installed Mission</h3><span>{spec?.catalog_ready ? spec.temporary_override ? "temporary override" : spec.classification ?? "verified" : "not verified"}</span></div>
         <dl className="status-list">
-          <div><dt>Specification</dt><dd>{spec?.label ?? mission?.active_spec_id ?? "unknown"}</dd></div>
+          <div><dt>Active catalog</dt><dd>{spec?.catalog_id ?? mission?.active_spec_id ?? "unknown"}</dd></div>
+          <div><dt>Profile default</dt><dd>{spec?.default_catalog_id ?? "unknown"}</dd></div>
+          <div><dt>Runtime profile</dt><dd>{selectionProfile}</dd></div>
         </dl>
         {spec?.load_error ? <p className="control-reason">{spec.load_error}</p> : null}
+        {spec?.experimental || spec?.classification === "experimental" ? <p className="control-reason">{spec.experimental_warning ?? "EXPERIMENTAL mission selected for this runtime session."}</p> : null}
+        <div className="inline-actions">
+          <button type="button" onClick={() => void refreshMissionCatalog()} disabled={catalogRefreshing}>
+            {catalogRefreshing ? "Refreshing missions…" : "Refresh missions"}
+          </button>
+        </div>
+        <label className="compact-field" htmlFor="mission-catalog-selection">
+          Pending mission selection
+          <select
+            id="mission-catalog-selection"
+            aria-label="Pending mission selection"
+            value={pendingCatalogId}
+            disabled={catalogEntries.length === 0 || catalogSelecting}
+            onChange={(event) => setPendingCatalogId(event.target.value)}
+          >
+            <option value="">Select an installed mission</option>
+            {catalogEntries.map((entry) => <option key={entry.id} value={entry.id}>{entry.id} ({entry.classification})</option>)}
+          </select>
+        </label>
+        {selectedCatalog ? <p className="control-hint">Pending classification: {selectedCatalog.classification}</p> : null}
+        {selectedCatalog?.experimentalWarning ? <p className="control-reason">{selectedCatalog.experimentalWarning}</p> : null}
+        {catalogMessage ? <p className="control-hint">{catalogMessage}</p> : null}
+        {catalogError ? <p className="control-reason">{catalogError}</p> : null}
+        <div className="command-grid">
+          <PressAndHoldButton
+            label="Apply selected mission"
+            disabledReason={applyCatalogReason}
+            onConfirm={() => void selectMissionCatalog({ catalog_id: pendingCatalogId })}
+          />
+          <PressAndHoldButton
+            label="Restore profile default"
+            disabledReason={catalogMutationReason}
+            onConfirm={() => void selectMissionCatalog({ default: true })}
+          />
+        </div>
       </section>
 
       <section className="workflow-section">
@@ -170,10 +308,13 @@ export function MissionPage({
 
       <section className="workflow-section">
         <div className="workflow-section__heading"><h3>Mission Intent</h3><span>{activeMode?.display_name ?? "inactive"}</span></div>
+        {intentRestriction ? <p className="control-reason" role="note">{intentRestriction}</p> : null}
         <div className="mission-intents">
-          {activeMode?.mode_key === "inspection_demo" ? <MissionIntent label="Recharge now" command="mission.recharge_now" state={mission?.intents?.find((item) => item.intent_key === "trigger_recharge_now")?.lifecycle} run={run} /> : null}
-          {activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Stay on cable" command="mission.stay_on_cable" state={mission?.intents?.find((item) => item.intent_key === "stay_on_cable")?.lifecycle} run={run} /> : null}
-          {activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Leave cable now" command="mission.leave_cable_now" state={mission?.intents?.find((item) => item.intent_key === "interrupt_recharging_now")?.lifecycle} run={run} /> : null}
+          {!intentRestriction && activeMode?.mode_key === "inspection_demo" ? <MissionIntent label="Recharge now" command="mission.recharge_now" state={mission?.intents?.find((item) => item.intent_key === "trigger_recharge_now")?.lifecycle} run={run} /> : null}
+          {!intentRestriction && activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Stay on cable" command="mission.stay_on_cable" state={mission?.intents?.find((item) => item.intent_key === "stay_on_cable")?.lifecycle} run={run} /> : null}
+          {!intentRestriction && activeMode?.mode_key === "cable_charging" ? <MissionIntent label="Leave cable now" command="mission.leave_cable_now" state={mission?.intents?.find((item) => item.intent_key === "interrupt_recharging_now")?.lifecycle} run={run} /> : null}
+          {/* The OptiTrack cycle hovers after takeoff until the operator proceeds. */}
+          {activeMode?.mode_key === "ot_cycle_takeoff" ? <MissionIntent label="Proceed" command="mission.proceed" state={mission?.intents?.find((item) => item.intent_key === "opti_track.proceed")?.lifecycle} run={run} /> : null}
           {!activeMode ? <p>No mission intent is available while the inspection mission is inactive.</p> : null}
         </div>
         {activeIntents.length ? <ol className="intent-history" aria-label="Mission intent lifecycle">{activeIntents.map((intent) => <li key={intent.intent_key}><strong>{intent.label}</strong><span>{intentLifecycleLabel(intent.lifecycle ?? "cleared")}</span>{intent.detail ? <small>{intent.detail}</small> : null}</li>)}</ol> : null}
@@ -220,13 +361,33 @@ function intentLifecycleLabel(value: string): string {
   return value.replaceAll("_", " ");
 }
 
-function inspectionStartDisabledReason(state: RuntimeStoreState): string | undefined {
+function missionStartDisabledReason(state: RuntimeStoreState, ownedModeKey: string | undefined): string | undefined {
   if (state.connection.commands_disabled_reason) return state.connection.commands_disabled_reason;
   const mission = state.domains.mission;
-  if (mission?.mission_state === "active" || mission?.modes?.some((mode) => mode.active || mode.tree_running)) return "Inspection mission is already active.";
-  const inspection = mission?.modes?.find((mode) => mode.mode_key === "inspection_demo");
-  if (mission?.specification?.canonical_loaded !== true) return mission?.specification?.load_error ?? "Canonical inspection specification is not confirmed.";
-  if (!mission.required_modes_registered || !inspection?.registered || inspection.freshness !== "fresh") return "Required mission modes are not freshly registered.";
+  if (mission?.mission_state === "active" || mission?.modes?.some((mode) => mode.active || mode.tree_running)) return "Mission is already active.";
+  if (mission?.specification?.catalog_ready !== true) return mission?.specification?.load_error ?? "Installed mission catalog is not ready.";
+  if (!ownedModeKey) return "The selected mission has no reported activation mode.";
+  const ownedMode = mission?.modes?.find((mode) => mode.mode_key === ownedModeKey);
+  if (mission.freshness !== "fresh" || !mission.required_modes_registered || !ownedMode?.registered || ownedMode.freshness !== "fresh" || ownedMode.mode_id == null) return "Required mission modes are not freshly registered.";
+  const control = state.domains.control;
+  const permissions = control?.latest?.command_permissions;
+  const reasons = isRecord(permissions) ? permissions["mission.activate"] : undefined;
+  if (control?.freshness !== "fresh" || !Array.isArray(reasons)) return "Mission activation permissions are unavailable.";
+  const rejection = reasons.find((reason) => typeof reason === "string" && reason.length > 0);
+  if (typeof rejection === "string") return rejection;
+  // Inspection retains its operator preparation/geometry checks. Other catalog
+  // roots, and every root of a profile without overviews, use their live
+  // onboard activation and overview rejections.
+  if (ownedModeKey !== "inspection_demo" || profileSurfaceUnavailableReason(state, "overviews")) {
+    // Where a mission mode may arm the aircraft itself (opti_track), the
+    // runtime's activation permissions and preflight decide the start.
+    if (profileCapabilities(state)?.disarmed_mission_activation === true) {
+      const failedPreflight = failedHardPreflight(mission);
+      return failedPreflight.length ? failedPreflight.map((item) => `${item.label}: ${item.detail ?? "not ready"}`).join("; ") : undefined;
+    }
+    if (state.domains.vehicle?.armed !== true || state.domains.vehicle?.in_air !== true) return "Aircraft must be armed and airborne; position it with RC or QGroundControl.";
+    return undefined;
+  }
   if (!state.domains.powerline?.stored_overview_valid) return "A valid stored powerline overview is required.";
   if (!state.domains.powerline?.pylon_overview?.valid) return "Two valid pylon endpoints are required.";
   if (!mission.inspection_start_eligibility?.eligible) return mission.inspection_start_eligibility?.failure_reasons?.join("; ") || "Aircraft is not in an eligible inspection start region.";
@@ -279,8 +440,61 @@ function readSystemStartStages(response: CommandResponse): SystemStartStage[] {
   return stages.filter((stage): stage is SystemStartStage => Boolean(stage) && typeof stage === "object" && typeof (stage as SystemStartStage).stage === "string" && typeof (stage as SystemStartStage).status === "string" && typeof (stage as SystemStartStage).detail === "string");
 }
 function systemProfile(state: RuntimeStoreState): string {
-  const profile = state.domains.system?.latest?.profile ?? state.domains.simulation?.profile;
-  return typeof profile === "string" && profile ? profile : "real";
+  return runtimeProfile(state) ?? "real";
+}
+function missionCatalogProfile(activeProfile: string | null | undefined, fallbackProfile: string): string {
+  return typeof activeProfile === "string" && activeProfile ? activeProfile : fallbackProfile;
+}
+function missionCatalogMutationDisabledReason(state: RuntimeStoreState, profile: string, catalogSelecting: boolean): string | undefined {
+  if (state.connection.commands_disabled_reason) return state.connection.commands_disabled_reason;
+  if (catalogSelecting) return "A mission catalog command is already in progress.";
+  const mission = state.domains.mission;
+  if (mission?.freshness !== "fresh") return "Mission status is stale or unavailable.";
+  if (mission.latest?.mission_active === true || mission.mission_state === "active" || mission.modes?.some((mode) => mode.active || mode.tree_running)) return "A mission is active.";
+  const operation = state.domains.operation;
+  if (operation?.freshness !== "fresh") return "Custom-operation status is stale or unavailable.";
+  if (operation.latest?.operation_active === true || Boolean(operation.active_operation_id)) return "A custom operation is active.";
+  if (profile.toLowerCase() === "sim") return undefined;
+  const vehicle = state.domains.vehicle;
+  if (vehicle?.freshness !== "fresh") return "PX4 vehicle state is stale or unavailable.";
+  if (vehicle?.source_availability !== "available") return "PX4 vehicle state is degraded or unavailable.";
+  if (vehicle.armed !== false) return "Vehicle is not confirmed disarmed.";
+  if (vehicle.in_air !== false) return "Vehicle is not confirmed landed.";
+  const navState = (vehicle.nav_state ?? "").toLowerCase();
+  if (!new Set(["manual", "position", "hold"]).has(navState)) return `PX4 navigation state is not maintenance-safe: ${navState || "unknown"}.`;
+  return undefined;
+}
+function readMissionCatalog(result: Record<string, unknown> | null | undefined, fallbackProfile: string): { profile: string; entries: MissionCatalogEntry[] } {
+  const catalog = result?.catalog;
+  if (!isRecord(catalog) || catalog.schema !== MISSION_CATALOG_SCHEMA || !Array.isArray(catalog.entries)) {
+    throw new Error("Runtime returned an unsupported mission catalog.");
+  }
+  const profile = typeof catalog.active_profile === "string" && catalog.active_profile ? catalog.active_profile : fallbackProfile;
+  const seenIds = new Set<string>();
+  const entries = catalog.entries.flatMap((value): MissionCatalogEntry[] => {
+    if (!isRecord(value) || value.available !== true || typeof value.id !== "string" || !isLogicalCatalogId(value.id)) return [];
+    const profiles = stringValues(value.profiles);
+    if (!profiles.includes(profile) || seenIds.has(value.id)) return [];
+    seenIds.add(value.id);
+    return [{
+      id: value.id,
+      classification: typeof value.classification === "string" ? value.classification : "unknown",
+      experimentalWarning: typeof value.experimental_warning === "string" && value.experimental_warning ? value.experimental_warning : null,
+    }];
+  });
+  return { profile, entries };
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function stringValues(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+function isLogicalCatalogId(value: string): boolean {
+  return Boolean(value) && !/[\\/~$]/.test(value);
+}
+function commandResponseMessage(response: CommandResponse): string {
+  return response.message ?? response.rejection?.message ?? response.command_id;
 }
 function commandResponseToResult(response: CommandResponse): CommandResult { return { id: response.request_id, severity: response.accepted ? "success" : "danger", title: response.accepted ? "Command accepted" : "Command rejected", message: response.message ?? response.rejection?.message ?? response.command_id }; }
 function errorToResult(commandId: string, error: unknown): CommandResult { return { id: `${commandId}-${Date.now()}`, severity: "danger", title: "Command failed", message: error instanceof Error ? error.message : String(error) }; }

@@ -2,6 +2,15 @@
 
 Status: Implemented baseline; field acceptance remains stage-gated.
 
+Access control: the authentication, single-session, heartbeat-lease, CLI-token
+and TLS design recorded in this spec is not implemented. GUI v2 runs with
+unrestricted developer access (see `gui-v2-security-checklist.md`): the GUI
+connects without a password and every client receives the fixed session token
+`developer-access`, the runtime API enforces no single session, lease, or
+GUI/CLI session conflict, and remote CLI calls need no token. Flight-safety
+command gating is enforced, and the GC proxy pins the expected runtime identity
+for `real` and `opti_track`.
+
 This document captures the agreed design for the GUI v2 rewrite and the open
 questions that must be resolved before implementation. Update it as decisions
 are made.
@@ -58,8 +67,8 @@ schemas.
   validates/selects one target, and proxies HTTP/WebSocket traffic.
 - The frontend talks only to the local GC proxy.
 - The ground-control computer does not need ROS/DDS/MAVSDK.
-- Browser GUI auth is owned by `iii-runtime-api`.
-- Only one authenticated browser session may be active at a time.
+- Browser GUI access is unrestricted for rapid prototyping (see the
+  access-control note above); the GC proxy pins the expected runtime identity.
 - Remote CLI uses `iii-runtime-api` for runtime-control commands.
 - SSH command forwarding is removed for remote runtime-control commands.
 - Dashboard is diagnostic-first; controls live on dedicated workflow pages.
@@ -135,8 +144,8 @@ Recommended `iii-runtime-api` execution model:
 
 Live operator state is WebSocket-first.
 
-`iii-runtime-api` exposes one authenticated WebSocket connection for the active
-GUI session. On connection, it sends a full typed operator snapshot. After that
+`iii-runtime-api` exposes a WebSocket connection for the GUI session (not
+authenticated). On connection, it sends a full typed operator snapshot. After that
 it sends domain-scoped patches and event messages.
 
 State domains:
@@ -307,7 +316,7 @@ Recommended architecture:
   commands instead of SSH command forwarding.
 - SSH should be removed from CLI runtime-control paths except for workflows
   that inherently require SSH, such as file transfer/synchronization and
-  explicitly opening an `iii ssh` shell.
+  explicitly opening an SSH shell.
 - Migrating the CLI remote profile runtime-control commands to
   `iii-runtime-api` is in scope for this sweep.
 - SSH command forwarding for remote runtime-control commands should be removed
@@ -323,23 +332,11 @@ Recommended architecture:
   - daemon Unix socket responding.
   - runtime booted.
   - system started/active.
-- `iii-runtime-api` owns GUI session authentication, single-active-session
-  enforcement, command gating, and runtime API token handling for remote CLI
-  access.
-- Initial browser authentication uses a simple shared password/token configured
-  for the deployment.
-- Initial remote CLI authentication uses a simple shared API token configured
-  for the deployment.
-- Browser GUI authentication creates the single active operator session/lease.
-- Remote CLI token authentication is separate and intended for non-interactive
-  CLI runtime-control operations.
-- Remote CLI operations must still respect runtime API safety rules and session
-  conflict policy.
-- While a GUI operator session is active, remote CLI read-only operations such
-  as status/list/log inspection are allowed.
-- While a GUI operator session is active, remote CLI mutating operations are
-  blocked in v2, including boot/start/stop/restart, service restart,
-  PX4/mode/mission/custom-operation commands, and configuration writes.
+- `iii-runtime-api` owns command gating. It does not authenticate browser or
+  remote CLI clients: the login step takes no password and issues the fixed
+  token `developer-access`, and remote CLI calls need no token.
+- Remote CLI operations must still respect runtime API safety rules. There is
+  no GUI/CLI session conflict policy while access is unrestricted.
 
 HTTP(S) plus WebSocket is the preferred first network protocol because it is
 easy for the frontend and remote CLI to consume, test, secure, and deploy. A
@@ -512,8 +509,8 @@ Current Tkinter GUI functionality to preserve:
 
 ### 7.1 Authoritative Field Inspection Workflow
 
-The detailed and authoritative procedure is
-[`docs/field-inspection-operations.md`](../../../docs/field-inspection-operations.md).
+The detailed and authoritative procedure is the workspace
+[`field-inspection-operations.md`](https://github.com/DIII-SDU-Group/III-Drone-ros2-ws/blob/main/docs/field-inspection-operations.md).
 In real operation the safety pilot manually flies to the overview position and
 both pylons. The GUI starts PL mapper, presents fresh spatial and orthogonal
 vector geometry for visual approval, stores one powerline overview, and captures
@@ -741,7 +738,12 @@ Configuration UI model:
 
 ### 8.2 Operator Session Authority
 
-GUI v2 uses a single-authoritative-operator model:
+Not implemented. The runtime takes no login password, issues the fixed
+session token `developer-access` to every client, and enforces no single
+session, heartbeat lease, or expiry (see the access-control note at the top).
+The rules below record the original design.
+
+The original design used a single-authoritative-operator model:
 
 - The whole GUI requires authentication.
 - All GUI functionality is login-gated, including logs, state, commands, and
@@ -842,11 +844,11 @@ The ground-control backend/proxy is intentionally thin:
 - It is implemented in Python/FastAPI for consistency with `iii-runtime-api`.
 - It performs mDNS/zeroconf discovery of available `iii-runtime-api` instances.
 - It exposes discovery results to the frontend.
-- It proxies authenticated HTTP/WebSocket communication between the frontend and
-  the selected runtime API.
+- It proxies HTTP/WebSocket communication between the frontend and the
+  selected runtime API.
 - It proxies only one selected runtime API at a time in v2.
 - Non-selected discovered runtime APIs are represented only by discovery
-  metadata, not live authenticated state.
+  metadata, not live state.
 - Changing the selected runtime API requires logout/disconnect from the current
   runtime first.
 - The selected validated runtime API endpoint is stored as global GC proxy
@@ -867,13 +869,13 @@ The ground-control backend/proxy is intentionally thin:
   API version compatibility, and WebSocket lifecycle handling.
 - It must not implement flight-state interpretation, command gating, or
   operator command behavior.
-- It does not own operator authentication or command-session authority.
+- It does not own command-session authority.
 - Browser login/session/heartbeat traffic is proxied to the selected
-  `iii-runtime-api`, which enforces authentication and single active session.
-- Heartbeat/lease authority lives in `iii-runtime-api`.
+  `iii-runtime-api`, which currently accepts any login and enforces no single
+  session or lease.
 - The ground-control backend/proxy passes heartbeat traffic through and should
   close upstream runtime API connections when the browser/proxy connection is
-  lost, but it does not own the operator lease.
+  lost.
 - In the ground-control Docker Compose stack, expose both the frontend port and
   the thin backend/proxy port on the ground-control computer.
 - The frontend communicates with the thin backend/proxy through the exposed
@@ -882,12 +884,15 @@ The ground-control backend/proxy is intentionally thin:
 
 Security/network decision:
 
-- The first GUI v2 deployment uses a trusted isolated operator network plus
-  runtime API browser-password and CLI-token authentication.
-- TLS is deferred for the first field deployment and must be added before GUI v2
-  is exposed outside a trusted isolated operator network.
-- See `gui-v2-deployment.md` and `gui-v2-security-checklist.md` for the
-  deployment controls and deferred TLS risks.
+- GUI v2 runs on the development and field-test network without application
+  authentication, runtime tokens, firewall rules, or deployment credentials;
+  access is deliberately unrestricted for rapid prototyping. Flight-safety
+  checks (vehicle state, disarm, landed, mode) remain enforced by the runtime
+  command handlers.
+- The browser-password, CLI-token, single-session and TLS design described
+  elsewhere in this spec is not implemented.
+- See `gui-v2-deployment.md` and `gui-v2-security-checklist.md` for the current
+  developer-access decision.
 
 Frontend serving decision:
 
@@ -915,10 +920,10 @@ Disconnected frontend behavior:
 
 Runtime API discovery:
 
-- Before authentication, the frontend discovers available `iii-runtime-api`
+- Before connecting, the frontend discovers available `iii-runtime-api`
   instances on the local/operator network.
 - The operator selects one detected runtime API instance.
-- Authentication is then performed against the selected runtime API.
+- Connecting then opens a session on the selected runtime API (no password).
 - The selected runtime API endpoint remains visible in the UI.
 - This lays groundwork for future multi-drone operation, but v2 controls only
   one selected runtime API/drone at a time.
@@ -933,11 +938,12 @@ Runtime API discovery:
   to the frontend. Manual endpoint entry remains the fallback.
 - Pre-login discovery exposes only minimal identity/reachability metadata such
   as runtime name, address, API version, optional profile, and reachable state.
-- Telemetry, health, logs, mode state, and detailed runtime metadata require
-  authentication.
-- `iii-runtime-api` may expose a minimal unauthenticated identity endpoint
-  equivalent to its mDNS metadata.
-- The unauthenticated identity endpoint must not expose operational state.
+- The GUI shows telemetry, health, logs, mode state, and detailed runtime
+  metadata only after its login step; the runtime API itself serves them to
+  any client.
+- `iii-runtime-api` exposes a minimal identity endpoint equivalent to its mDNS
+  metadata, which the GC proxy also uses for identity pinning.
+- The identity endpoint must not expose operational state.
 
 Out of scope for this sweep:
 
@@ -971,9 +977,9 @@ The implementation and authoritative field workflow resolve these questions:
 1. What is the primary operator workflow and first-screen layout?
 2. Which commands are allowed in simulation only, real only, or both?
 3. What safety confirmations are required for dangerous commands?
-4. Should the GUI support multiple simultaneous browser clients? Resolved:
-   no. One authenticated active browser session at a time; no read-only client
-   mode in v2.
+4. Should the GUI support multiple simultaneous browser clients? Designed:
+   one active browser session and no read-only client mode; not enforced while
+   access is unrestricted (see the access-control note at the top).
 5. What is the expected network trust/security model?
 6. How should the frontend represent stale, missing, or degraded telemetry?
 7. What exact parameter-editing workflow should replace the current GUI?
@@ -1028,19 +1034,14 @@ Acceptance criteria:
   WebSocket.
 - It throttles/coalesces high-rate ROS updates before sending them over the
   network.
-- It owns browser authentication, single active session, heartbeat lease,
-  command gating, and remote CLI token auth.
-- Browser session survives refresh and expires after missed heartbeats.
-- Heartbeat cadence is 2 seconds; session expiry timeout is 8 seconds.
-- Runtime API exposes only minimal unauthenticated identity metadata.
+- It owns command gating; browser and remote CLI access are not authenticated
+  (developer access).
+- Runtime API exposes a minimal identity endpoint for discovery and pinning.
 - Runtime API logs accepted/rejected mutating commands to normal service logs.
 
 Tests:
 
 - Unit tests for daemon/systemd adapter behavior with fakes.
-- Unit tests for session acquisition, rejection of second session, heartbeat
-  renewal, expiry, logout, and refresh survival.
-- Unit tests for browser password auth and remote CLI token auth.
 - WebSocket snapshot/patch/event protocol tests.
 - Command gating tests for mission/custom-operation/other PX4 modes.
 - Runtime-control gating tests for armed/in-flight/unknown vehicle state.
@@ -1064,8 +1065,7 @@ Acceptance criteria:
 - It validates manual endpoints before allowing selection.
 - It proxies only one selected runtime API at a time.
 - It is not an open proxy.
-- It proxies browser auth/session/heartbeat to `iii-runtime-api`; it does not
-  own operator lease authority.
+- It proxies browser session/heartbeat traffic to `iii-runtime-api`.
 - It supports HTTP and WebSocket proxying to the selected runtime API.
 - Changing selected runtime requires logout/disconnect first.
 
@@ -1084,10 +1084,10 @@ Tests:
 Acceptance criteria:
 
 - Frontend depends on generated contracts/types and does not depend on ROS.
-- Login-gated UI exposes no detailed operational state before authentication.
+- The UI shows no detailed operational state before its login step.
 - Discovery screen shows only minimal runtime identity/reachability metadata.
 - Only one selected runtime is controlled at a time.
-- Dashboard is the first authenticated page and is primarily diagnostic.
+- Dashboard is the first page after login and is primarily diagnostic.
 - Dedicated pages exist for Runtime, Flight, Operations, Payload, Perception,
   Configuration, Rosbags, Logs, and Map.
 - Global bottom status bar is visible on every page.
@@ -1149,9 +1149,6 @@ Acceptance criteria:
 Tests:
 
 - Remote CLI client tests against fake runtime API.
-- Auth token tests.
-- Read-only allowed during GUI session test.
-- Mutating blocked during GUI session test.
 - Unavailable runtime API produces clear error test.
 - Existing local daemon-socket CLI tests remain passing.
 
@@ -1161,7 +1158,7 @@ Simulation acceptance:
 
 - Start GC frontend/proxy stack on the development computer.
 - Discover local sim `iii-runtime-api` through mDNS or manual fallback.
-- Authenticate and acquire the only active GUI session.
+- Connect to the selected runtime (no password).
 - Boot/start III runtime through GUI Runtime page.
 - Observe dashboard status and health update.
 - Observe fused PX4 status once PX4/Gazebo is available.
@@ -1217,12 +1214,11 @@ Parity acceptance:
 - mDNS/zeroconf discovery:
   - Browser limitations require the GC proxy to perform discovery.
   - Field networks may block mDNS; manual endpoint fallback is required.
-- Authentication/security:
-  - v2 uses simple shared password/token auth.
-  - The first deployment uses a trusted isolated operator network; TLS is
-    deferred with explicit risk in the security checklist.
-  - Exposed GC proxy and runtime API ports must avoid open-proxy behavior and
-    detailed unauthenticated metadata.
+- Access control:
+  - v2 runs without authentication, tokens, or TLS for rapid prototyping;
+    anyone on the operator network can reach the runtime API, so that network
+    must be trusted (the OptiTrack lab network is shared with other groups).
+  - Exposed GC proxy ports must avoid open-proxy behavior.
 - PX4 command transport:
   - v2 assumes MAVLink is available over the FCU Ethernet link.
   - Runtime API must surface degraded state if MAVLink/MAVSDK is unavailable.
@@ -1271,7 +1267,7 @@ complexity.
 
 ## 12. Information Architecture
 
-After authentication, the first screen is the Mission workflow.
+After login, the first screen is the Mission workflow.
 There is no landing page.
 
 Target device class for v2 is computer/laptop displays only. Tablet/mobile
@@ -1300,7 +1296,7 @@ frame/context is unavailable or stale.
 
 The dashboard should immediately present:
 
-- session/authentication state.
+- session state.
 - runtime connection and selected profile.
 - PX4/vehicle state.
 - control owner.

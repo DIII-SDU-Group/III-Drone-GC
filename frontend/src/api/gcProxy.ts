@@ -39,7 +39,7 @@ export type GcProxyClient = {
   addManualEndpoint(baseUrl: string, runtimeName?: string): Promise<RuntimeEndpointSummary>;
   validateTarget(endpointId: string): Promise<RuntimeEndpointSummary>;
   selectTarget(endpointId: string): Promise<RuntimeTargetState>;
-  login(password: string, clientLabel: string): Promise<LoginResponse>;
+  login(clientLabel: string): Promise<LoginResponse>;
   session(token: string): Promise<SessionResponse>;
   heartbeat(token: string): Promise<SessionResponse>;
   logout(token: string): Promise<void>;
@@ -64,10 +64,10 @@ export function createGcProxyClient(proxyUrl: string): GcProxyClient {
         method: "POST",
         body: JSON.stringify({ endpoint_id }),
       }),
-    login: (password, client_label) =>
+    login: (client_label) =>
       requestJson<LoginResponse>(baseUrl, "/proxy/session/login", {
         method: "POST",
-        body: JSON.stringify({ password, client_label }),
+        body: JSON.stringify({ client_label }),
       }),
     session: (token) => requestJson<SessionResponse>(baseUrl, "/proxy/session", authOptions(token)),
     heartbeat: (token) =>

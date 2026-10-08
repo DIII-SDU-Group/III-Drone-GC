@@ -9,7 +9,7 @@ import {
 } from "../components";
 import type { CommandResponse } from "../generated/contracts";
 import type { RuntimeCommandDispatcher } from "../api/commands";
-import type { RuntimeStoreState } from "../state";
+import { runtimeProfile, type RuntimeStoreState } from "../state";
 
 const RUNTIME_COMMANDS = {
   boot: "runtime.boot",
@@ -607,8 +607,7 @@ function rowState(record: Record<string, unknown>): Omit<RuntimeInventoryRow, "i
 }
 
 function profile(state: RuntimeStoreState): string {
-  const rawProfile = state.domains.system?.latest?.profile ?? state.domains.simulation?.profile;
-  return typeof rawProfile === "string" ? rawProfile : "sim";
+  return runtimeProfile(state) ?? "sim";
 }
 
 function boolText(value: boolean | null | undefined): string {

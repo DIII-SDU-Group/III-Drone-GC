@@ -11,7 +11,7 @@ import {
 } from "../components";
 import type { RuntimeCommandDispatcher } from "../api/commands";
 import type { CommandResponse } from "../generated/contracts";
-import type { RuntimeStoreState } from "../state";
+import { customOperationUnavailableReason, type RuntimeStoreState } from "../state";
 
 type FieldDef = {
   key: string;
@@ -116,6 +116,11 @@ export function OperationsPage({
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [readiness, setReadiness] = useState<Record<string, string>>({});
   const customOperationModeActive = isCustomOperationModeActive(state);
+  // Operations the runtime profile does not offer are listed, not offered.
+  const availableDefs = operationDefs.filter((def) => !customOperationUnavailableReason(state, def.operation));
+  const restrictionReasons = operationDefs
+    .map((def) => customOperationUnavailableReason(state, def.operation))
+    .filter((reason): reason is string => Boolean(reason));
 
   async function runCommand(commandId: string, parameters: Record<string, unknown>) {
     try {
@@ -176,8 +181,14 @@ export function OperationsPage({
         />
       </section>
 
+      {restrictionReasons.length ? (
+        <ul className="control-reason profile-restriction" aria-label="Unavailable custom operations">
+          {restrictionReasons.map((reason) => <li key={reason}>{reason}</li>)}
+        </ul>
+      ) : null}
+
       <section className="operation-form-grid" aria-label="Custom operation forms">
-        {operationDefs.map((def) => {
+        {availableDefs.map((def) => {
           const disabledReason = operationDisabledReason(state, def);
           return (
             <article className="operation-form" key={def.operation}>
@@ -349,6 +360,8 @@ function isOperationActive(state: RuntimeStoreState): boolean {
   return Boolean(operation?.active_operation_id || operation?.latest?.operation_active === true);
 }
 
+// Shared by the global safety controls; a non-component export intentionally makes this a full-refresh boundary.
+// eslint-disable-next-line react-refresh/only-export-components
 export function operationCancelDisabledReason(state: RuntimeStoreState): string | undefined {
   if (state.connection.commands_disabled_reason) {
     return state.connection.commands_disabled_reason;

@@ -4,6 +4,13 @@ export {
   initialRuntimeStoreState,
   runtimeStoreReducer,
 } from "./runtimeStore";
+export {
+  customOperationUnavailableReason,
+  profileCapabilities,
+  profileSurfaceUnavailableReason,
+  runtimeProfile,
+} from "./capabilities";
+export type { ProfileSurface } from "./capabilities";
 export type {
   LabelledEvent,
   RuntimeConnectionState,

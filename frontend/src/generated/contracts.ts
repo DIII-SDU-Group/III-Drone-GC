@@ -91,6 +91,26 @@ export interface ConfigurationStatus {
   default_snapshot_id?: string | null;
   pending_restart?: boolean;
   pending_constant_names?: Array<string>;
+  pending_boot_values?: Record<string, unknown>;
+  tuning_session_id?: string | null;
+  tuning_baseline_id?: string | null;
+  tuning_target_id?: string | null;
+  tuning_runtime_profile?: string | null;
+  tuning_release_id?: string | null;
+  tuning_workspace_id?: string | null;
+  tuning_manifest_id?: string | null;
+  tuning_revision?: number;
+  tuning_journal_sequence?: number;
+  tuning_journal_checksum?: string | null;
+  tuning_created_at?: string | null;
+  tuning_updated_at?: string | null;
+  configuration_divergent?: boolean;
+  divergent_observations?: Record<string, unknown>;
+  mirror_state?: "not-required" | "degraded" | "current";
+  mirror_ack_revision?: number | null;
+  mirror_ack_sequence?: number | null;
+  mirror_ack_checksum?: string | null;
+  mirror_error?: string | null;
   badges?: Array<"Pending edits" | "Unsaved" | "Non-default" | "Restart required">;
 }
 
@@ -110,7 +130,7 @@ export interface ControlDomainState {
 
 export type DomainName = "system" | "vehicle" | "control" | "mission" | "operation" | "perception" | "powerline" | "map" | "payload" | "configuration" | "simulation" | "rosbag" | "events";
 
-export type ErrorCode = "authentication_required" | "forbidden" | "conflict" | "invalid_request" | "unsupported" | "stale_state" | "degraded_state" | "handler_unavailable" | "internal_error";
+export type ErrorCode = "authentication_required" | "forbidden" | "conflict" | "invalid_request" | "unsupported" | "profile_restricted" | "stale_state" | "degraded_state" | "handler_unavailable" | "internal_error";
 
 export type EventSource = "runtime" | "gc_proxy" | "frontend" | "cli" | "ros";
 
@@ -124,6 +144,31 @@ export interface EventsDomainState {
   error_reason?: string | null;
   latest?: Record<string, unknown>;
   recent_events?: Array<OperatorEvent>;
+}
+
+export interface ExternalVisionState {
+  ready?: boolean;
+  freshness?: Freshness;
+  degraded_reason?: string | null;
+  relay_level?: "ok" | "warn" | "error" | "stale" | "unknown";
+  relay_message?: string | null;
+  relay_freshness?: Freshness;
+  relay_timestamp?: string | null;
+  relay_stale?: boolean | null;
+  input_rate_hz?: number | null;
+  output_rate_hz?: number | null;
+  last_input_age_ms?: number | null;
+  max_input_gap_ms?: number | null;
+  lab_stamp_age_ms?: number | null;
+  origin_sent?: boolean | null;
+  rigid_body_id?: string | null;
+  ev_pos_fused?: boolean | null;
+  ev_hgt_fused?: boolean | null;
+  ev_yaw_fused?: boolean | null;
+  fusion_freshness?: Freshness;
+  fusion_timestamp?: string | null;
+  origin_valid?: boolean | null;
+  origin_freshness?: Freshness;
 }
 
 export type Freshness = "fresh" | "stale" | "unknown";
@@ -245,12 +290,19 @@ export interface MissionModeRegistryEntry {
 }
 
 export interface MissionSpecificationIdentity {
-  active_path?: string | null;
-  canonical_path?: string | null;
-  label?: string | null;
-  content_hash?: string | null;
-  canonical_loaded?: boolean | null;
-  configuration_profile?: string;
+  catalog_id?: string | null;
+  catalog_hash?: string | null;
+  entry_hash?: string | null;
+  specification_asset_id?: string | null;
+  behavior_tree_asset_ids?: Array<string>;
+  default_catalog_id?: string | null;
+  classification?: "production" | "experimental" | "test" | "legacy" | "unknown";
+  compatible_profiles?: Array<string>;
+  active_profile?: string;
+  temporary_override?: boolean;
+  experimental?: boolean;
+  experimental_warning?: string | null;
+  catalog_ready?: boolean;
   load_error?: string | null;
 }
 
@@ -480,6 +532,17 @@ export interface PowerlineLineGeometry {
   in_field_of_view?: boolean;
 }
 
+export interface ProfileCapabilities {
+  profile?: string | null;
+  payload_available?: boolean;
+  perception_available?: boolean;
+  overviews_available?: boolean;
+  cable_intents_available?: boolean;
+  simulation_available?: boolean;
+  custom_operations?: Array<string> | null;
+  disarmed_mission_activation?: boolean;
+}
+
 export interface ProjectionPlane {
   point?: Point3;
   normal?: Point3;
@@ -566,6 +629,7 @@ export interface SystemDomainState {
   daemon_state?: string;
   booted?: boolean | null;
   active?: boolean | null;
+  capabilities?: ProfileCapabilities | null;
 }
 
 export interface TargetState {
@@ -616,6 +680,7 @@ export interface VehicleDomainState {
   battery_current_a?: number | null;
   battery_power_w?: number | null;
   battery_warning?: number | null;
+  external_vision?: ExternalVisionState | null;
 }
 
 export interface ActionStartResponse {
@@ -650,6 +715,7 @@ export interface ApiIdentity {
   runtime_name: string;
   profile?: string | null;
   host_label?: string | null;
+  capabilities?: ProfileCapabilities | null;
   compatibility?: ApiCompatibility;
   server_time?: string;
 }
@@ -697,12 +763,20 @@ export interface CommandResultMessage {
 
 export interface ConfigurationApplyRequest {
   edits: Array<ParameterEdit>;
+  request_id?: string | null;
+  expected_revision?: number | null;
+  operator_id?: string | null;
 }
 
 export interface ConfigurationApplyResponse {
   ok: boolean;
   results: Array<ParameterApplyResult>;
   status?: ConfigurationStatus;
+  session_id?: string | null;
+  transaction_id?: string | null;
+  revision?: number | null;
+  transaction_status?: string | null;
+  idempotent_replay?: boolean;
 }
 
 export interface ConfigurationManifest {

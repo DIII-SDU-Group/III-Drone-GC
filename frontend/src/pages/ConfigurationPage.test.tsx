@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigurationManifest } from "../generated/contracts";
@@ -144,6 +144,7 @@ describe("ConfigurationPage", () => {
 
     expect(dispatchCommand).toHaveBeenCalledWith("configuration.apply", {
       edits: [{ node_id: "controller", name: "/control/gains/p", value: 2.5 }],
+      expected_revision: 0,
     });
     expect(await screen.findByRole("status")).toHaveTextContent("1 parameter edit applied");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -204,15 +205,61 @@ describe("ConfigurationPage", () => {
     });
   });
 
-  it("wires download immediately and load/default with press-and-hold", () => {
+  it("downloads a snapshot's YAML from the runtime under its file name", async () => {
+    const content = "/**:\n  ros__parameters:\n    /control/example: 1.0\n";
+    const dispatchCommand = vi.fn().mockResolvedValue({
+      ...accepted("configuration.snapshot.download"),
+      result: { snapshot: { snapshot_id: "snapshots/tuned.yaml", content, content_sha256: "sha" } },
+    });
+    const blobs: Blob[] = [];
+    const savedFileNames: string[] = [];
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      blobs.push(blob);
+      return "blob:snapshot";
+    });
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      savedFileNames.push(this.download);
+    });
+    try {
+      render(<ConfigurationPage state={state()} dispatchCommand={dispatchCommand} />);
+
+      expect(screen.queryByText("Capture on GC host")).not.toBeInTheDocument();
+      fireEvent.click(screen.getAllByRole("button", { name: "Download" })[1]);
+
+      await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+      expect(dispatchCommand).toHaveBeenCalledWith("configuration.snapshot.download", { snapshot_id: "snapshots/tuned.yaml" });
+      expect(savedFileNames).toEqual(["tuned.yaml"]);
+      expect(blobs[0].type).toBe("application/x-yaml");
+      expect(await blobs[0].text()).toBe(content);
+    } finally {
+      click.mockRestore();
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it("reports a snapshot download without YAML content instead of saving a file", async () => {
+    const dispatchCommand = vi.fn().mockResolvedValue(accepted("configuration.snapshot.download"));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    try {
+      render(<ConfigurationPage state={state()} dispatchCommand={dispatchCommand} />);
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Download" })[0]);
+
+      expect(await screen.findByText(/returned no YAML content/)).toBeInTheDocument();
+      expect(click).not.toHaveBeenCalled();
+    } finally {
+      click.mockRestore();
+    }
+  });
+
+  it("keeps load and set-default press-and-hold", () => {
     vi.useFakeTimers();
     const dispatchCommand = vi.fn().mockResolvedValue(accepted("configuration.snapshot.load"));
     render(<ConfigurationPage state={state()} dispatchCommand={dispatchCommand} />);
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Download" })[0]);
-    expect(dispatchCommand).toHaveBeenCalledWith("configuration.snapshot.download", {
-      snapshot_id: "tracked/default.yaml",
-    });
 
     fireEvent.pointerDown(screen.getAllByRole("button", { name: "Load" })[1]);
     act(() => vi.advanceTimersByTime(1500));
@@ -227,8 +274,8 @@ describe("ConfigurationPage", () => {
     expect(screen.getByText("Setting a default while runtime is active affects the next load or restart.")).toBeInTheDocument();
   });
 
-  it("disables writes in Mission mode while read-only download remains available", () => {
-    const dispatchCommand = vi.fn().mockResolvedValue(accepted("configuration.snapshot.download"));
+  it("disables writes in Mission mode while snapshot downloads remain available", () => {
+    const dispatchCommand = vi.fn();
     render(
       <ConfigurationPage
         state={state({ domains: { mission: { mission_state: "active", latest: {}, freshness: "fresh" }, configuration: state().domains.configuration } })}
@@ -239,11 +286,10 @@ describe("ConfigurationPage", () => {
     expect(screen.getAllByText("configuration writes are disabled in Mission mode").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Save snapshot" })).toBeDisabled();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Download" })[0]);
-
-    expect(dispatchCommand).toHaveBeenCalledWith("configuration.snapshot.download", {
-      snapshot_id: "tracked/default.yaml",
-    });
+    for (const download of screen.getAllByRole("button", { name: "Download" })) {
+      expect(download).toBeEnabled();
+    }
+    expect(dispatchCommand).not.toHaveBeenCalled();
   });
 
   it("distinguishes active, local, and persisted constant values and links to Runtime", () => {
@@ -251,6 +297,7 @@ describe("ConfigurationPage", () => {
     const manifest = pending.domains.configuration?.latest?.manifest as ConfigurationManifest;
     manifest.status!.pending_restart = true;
     manifest.status!.pending_constant_names = ["/control/static_frame"];
+    manifest.status!.pending_boot_values = { "/control/static_frame": "odom" };
     const parameter = manifest.nodes![0].groups![0].parameters![1];
     parameter.constant = true;
     parameter.active_value = "map";
@@ -266,11 +313,38 @@ describe("ConfigurationPage", () => {
       />,
     );
 
-    expect(screen.getAllByText("Only valid after system restart").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Pending next cold restart").length).toBeGreaterThan(0);
+    expect(screen.getByText(/active map → next odom/)).toBeInTheDocument();
     expect(screen.getAllByText("/control/static_frame").length).toBeGreaterThan(0);
     expect(screen.getByText("odom")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open Runtime" }));
     expect(onOpenRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a divergent configuration fault and does not add session controls", () => {
+    const divergent = state();
+    const manifest = divergent.domains.configuration?.latest?.manifest as ConfigurationManifest;
+    manifest.status!.configuration_divergent = true;
+    manifest.status!.divergent_observations = { "/control/gains/p": 1.7 };
+
+    render(<ConfigurationPage state={divergent} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Configuration truth is divergent");
+    expect(screen.queryByRole("button", { name: /session/i })).not.toBeInTheDocument();
+  });
+
+  it("shows mirror degradation without blocking target-durable tuning", () => {
+    const degraded = state();
+    const manifest = degraded.domains.configuration?.latest?.manifest as ConfigurationManifest;
+    manifest.status!.mirror_state = "degraded";
+    manifest.status!.tuning_revision = 7;
+
+    render(<ConfigurationPage state={degraded} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("GC revision mirror degraded");
+    expect(screen.getByText("degraded; target at revision 7")).toBeInTheDocument();
+    expect(screen.getByLabelText("/control/gains/p")).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /session/i })).not.toBeInTheDocument();
   });
 
   it("uses per-parameter server permission and exact rejection reason", () => {

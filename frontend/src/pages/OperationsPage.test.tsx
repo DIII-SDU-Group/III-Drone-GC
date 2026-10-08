@@ -56,6 +56,23 @@ describe("OperationsPage", () => {
     }
     expect(screen.queryByLabelText(/json/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /raw/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Unavailable custom operations")).not.toBeInTheDocument();
+  });
+
+  it("offers only the custom operations the runtime profile allows and says why", () => {
+    const restricted = state();
+    restricted.domains.system = { capabilities: { profile: "opti_track", custom_operations: ["fly_to_position", "hover"] } };
+    render(<OperationsPage state={restricted} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("heading", { name: "Fly to position" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Hover" })).toBeInTheDocument();
+    for (const label of ["Cable-aware fly to position", "Fly to object", "Cable landing", "Cable takeoff", "Hover by object", "Hover on cable"]) {
+      expect(screen.queryByRole("heading", { name: label })).not.toBeInTheDocument();
+    }
+    const reasons = screen.getByLabelText("Unavailable custom operations");
+    for (const operation of ["cable_aware_fly_to_position", "fly_to_object", "cable_landing", "cable_takeoff", "hover_by_object", "hover_on_cable"]) {
+      expect(reasons).toHaveTextContent(`Custom operation ${operation} is not available in the opti_track profile.`);
+    }
   });
 
   it("uses explicit operation-specific coordinate frames", () => {

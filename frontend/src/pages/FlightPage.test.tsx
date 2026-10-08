@@ -53,6 +53,46 @@ describe("FlightPage", () => {
     vi.useRealTimers();
   });
 
+  it("shows external-vision health when the aircraft positions from motion capture", () => {
+    const withVision = state();
+    withVision.domains.vehicle!.external_vision = {
+      ready: false,
+      freshness: "fresh",
+      degraded_reason: "PX4 is not fusing external-vision yaw",
+      relay_level: "ok",
+      relay_freshness: "fresh",
+      relay_stale: false,
+      input_rate_hz: 119.6,
+      output_rate_hz: 60,
+      last_input_age_ms: 7.4,
+      max_input_gap_ms: 21,
+      rigid_body_id: "3",
+      origin_sent: true,
+      ev_pos_fused: true,
+      ev_hgt_fused: true,
+      ev_yaw_fused: false,
+      fusion_freshness: "fresh",
+      origin_valid: true,
+      origin_freshness: "fresh",
+    };
+    render(<FlightPage state={withVision} dispatchCommand={vi.fn()} />);
+
+    const section = screen.getByRole("region", { name: "External vision" });
+    expect(section).toHaveTextContent("not ready");
+    expect(section).toHaveTextContent("ok (fresh)");
+    expect(section).toHaveTextContent("120 Hz");
+    expect(section).toHaveTextContent("7 ms");
+    expect(section).toHaveTextContent("position fused, height fused, yaw not fused (fresh)");
+    expect(section).toHaveTextContent("set (fresh), sent by relay");
+    expect(section).toHaveTextContent("PX4 is not fusing external-vision yaw");
+  });
+
+  it("omits external vision for an aircraft without it", () => {
+    render(<FlightPage state={state()} dispatchCommand={vi.fn()} />);
+
+    expect(screen.queryByRole("region", { name: "External vision" })).not.toBeInTheDocument();
+  });
+
   it("wires flight controls to runtime command IDs", () => {
     const dispatchCommand = vi.fn().mockResolvedValue({
       request_id: "hold-1",

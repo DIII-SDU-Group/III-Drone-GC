@@ -23,7 +23,6 @@ implementation only:
 
 - `gc_node.py`: operator-facing aggregation node; centralizes subscriptions, service clients, callbacks, and helper getters
 - `gui.py`: Tk GUI implementation built around `IIIGCNode`
-- `gui_original.py`: earlier Tk implementation kept for reference
 
 Do not build new GUI v2 behavior on `IIIGCNode`. Map legacy diagnostics and
 commands into runtime API domains/pages instead.
@@ -40,23 +39,33 @@ commands into runtime API domains/pages instead.
   complete inspection/recharge/resume acceptance cycle.
 - `docs/gui-v2-real-profile-acceptance.md`: staged signed real-aircraft
   inspection acceptance record.
-- `docs/gui-v2-security-checklist.md`: trusted-operator-network security
-  checklist and deferred TLS work.
+- `docs/gui-v2-security-checklist.md`: the developer-access decision (no
+  authentication, tokens, or firewall rules).
 - `docs/gui-v2-risk-register.md`: completion gate for GUI v2 open risks,
   owner tasks, evidence, and final acceptance checks.
 
 ### Operator Startup
 
 After provisioning `~/.config/iii-ground-control.env` from
-`config/ground-control.env.example`, start the field operator stack with one
-command from any working directory:
+`config/ground-control.env.example` (field, `real`) or
+`config/ground-control.opti_track.env.example` (OptiTrack lab, `opti_track`),
+start the operator stack with one command from any working directory:
 
 ```bash
 /path/to/III-Drone-ros2-ws/scripts/workspace/iii_ground_control.sh start
 ```
 
+Both examples pin the aircraft's provisioned identity (`iii-runtime` /
+`iii-drone`); an aircraft profile (`real`, `opti_track`) refuses to start the
+proxy without a pinned identity and explicit CORS origins. The GUI hides or
+disables the controls a profile does not support (the runtime advertises its
+profile capabilities; `opti_track` has no payload, perception, overviews or
+cable intents) and shows the external-vision health of an `opti_track`
+aircraft on the Flight page and Dashboard.
+
 The same command supports `status`, `logs`, `restart`/`recover`, and `stop`.
-Stop and recovery capture Compose logs under `runtime_logs/ground-control/`.
+Stop and recovery capture Compose logs under
+`${XDG_STATE_HOME:-~/.local/state}/iii/ground-control/` by default.
 The onboard `iii-runtime-api.service` is independently supervised and remains
 reachable when managed aircraft nodes are stopped from the Runtime page.
 

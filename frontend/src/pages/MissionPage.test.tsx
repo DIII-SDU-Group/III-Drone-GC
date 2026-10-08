@@ -23,19 +23,26 @@ function readyState(): RuntimeStoreState {
         battery_warning: 0,
         latest: {},
       },
-      control: { owner: "px4_hold", freshness: "fresh", source_availability: "available", latest: {} },
+      control: { owner: "px4_hold", freshness: "fresh", source_availability: "available", latest: { command_permissions: { "mission.activate": [] } } },
       mission: {
+        active_spec_id: "inspection-production",
         mission_state: "ready",
         freshness: "fresh",
         source_availability: "available",
         required_modes_registered: true,
         specification: {
-          active_path: "/missions/mission_specification.yaml",
-          canonical_path: "/missions/mission_specification.yaml",
-          label: "Inspection Demo",
-          content_hash: "sha256:abc",
-          canonical_loaded: true,
-          configuration_profile: "sim",
+          catalog_id: "inspection-production",
+          catalog_hash: "sha256:catalog",
+          entry_hash: "sha256:entry",
+          specification_asset_id: "sha256:abc",
+          behavior_tree_asset_ids: ["sha256:tree"],
+          default_catalog_id: "inspection-production",
+          classification: "production",
+          compatible_profiles: ["sim"],
+          active_profile: "sim",
+          temporary_override: false,
+          experimental: false,
+          catalog_ready: true,
         },
         modes: [{ mode_key: "inspection_demo", display_name: "Inspection Demo", mode_id: 28, registered: true, active: false, tree_running: false, tree_finished: false, freshness: "fresh" }],
         inspection_start_eligibility: {
@@ -79,7 +86,7 @@ function readyState(): RuntimeStoreState {
           source: "runtime fusion",
           recent_context: [],
         },
-        latest: {},
+        latest: { owned_mode: "inspection_demo" },
       },
       perception: { pl_mapper_state: "Running", freshness: "fresh", source_availability: "available", latest: { permissions: { mutating_commands_allowed: true, mutation_rejections: [] } } },
       powerline: {
@@ -114,6 +121,19 @@ function readyState(): RuntimeStoreState {
     command_results: [],
     connection: { connected: true, stale: false, reconnect_attempt: 0, next_reconnect_delay_ms: null, commands_disabled_reason: null },
   };
+}
+
+function optiTrackOnGround(): RuntimeStoreState {
+  const state = readyState();
+  state.domains.system!.capabilities = { profile: "opti_track", overviews_available: false, disarmed_mission_activation: true };
+  state.domains.vehicle = { ...state.domains.vehicle, armed: false, in_air: false, nav_state: "position" };
+  state.domains.mission!.latest = { owned_mode: "ot_cycle_takeoff" };
+  state.domains.mission!.modes = [{ mode_key: "ot_cycle_takeoff", display_name: "OT Takeoff", mode_id: 30, registered: true, active: false, tree_running: false, tree_finished: false, freshness: "fresh" }];
+  state.domains.mission!.preflight = {
+    ready: true,
+    items: [{ key: "ready_to_arm", label: "Aircraft ready to arm", passed: true, hard_gate: true, source: "PX4 fused safety state", detail: "disarmed and landed; PX4 arming checks passed" }],
+  };
+  return state;
 }
 
 describe("MissionPage", () => {
@@ -291,4 +311,337 @@ describe("MissionPage", () => {
     expect(screen.getByText(/Use Hold or manual takeover/)).toBeInTheDocument();
     expect(screen.queryByText("Charging failure")).not.toBeInTheDocument();
   });
+
+  it("lists only compatible installed mission catalog entries from the runtime contract", async () => {
+    const dispatchCommand = vi.fn().mockResolvedValue({
+      request_id: "catalog-list-1",
+      command_id: "mission.catalog.list",
+      accepted: true,
+      message: "mission catalog entries returned",
+      result: {
+        catalog: {
+          schema: "iii.mission-catalog/v1",
+          active_profile: "hil",
+          entries: [
+            { id: "inspection-production", classification: "production", profiles: ["hil", "sim"], available: true },
+            { id: "inspection-development", classification: "experimental", profiles: ["hil"], available: true, experimental_warning: "EXPERIMENTAL mission: not qualified for production release or flight." },
+            { id: "simulation-only", classification: "production", profiles: ["sim"], available: false },
+          ],
+        },
+      },
+    });
+    render(<MissionPage state={readyState()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.catalog.list", { all: false });
+    expect(screen.getByRole("option", { name: "inspection-production (production)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "inspection-development (experimental)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "simulation-only (production)" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Pending mission selection"), { target: { value: "inspection-development" } });
+    expect(screen.getByText("EXPERIMENTAL mission: not qualified for production release or flight.")).toBeInTheDocument();
+  });
+
+  it("sends logical catalog ID and default selection payloads only after press-and-hold", async () => {
+    const dispatchCommand = vi.fn()
+      .mockResolvedValueOnce({
+        request_id: "catalog-list-2",
+        command_id: "mission.catalog.list",
+        accepted: true,
+        result: {
+          catalog: {
+            schema: "iii.mission-catalog/v1",
+            active_profile: "sim",
+            entries: [
+              { id: "inspection-production", classification: "production", profiles: ["sim"], available: true },
+              { id: "inspection-development", classification: "experimental", profiles: ["sim"], available: true },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({ request_id: "catalog-select-1", command_id: "mission.catalog.select", accepted: true, result: {} })
+      .mockResolvedValueOnce({ request_id: "catalog-select-2", command_id: "mission.catalog.select", accepted: true, result: {} });
+    render(<MissionPage state={readyState()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+    fireEvent.change(screen.getByLabelText("Pending mission selection"), { target: { value: "inspection-development" } });
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Apply selected mission" }));
+    act(() => vi.advanceTimersByTime(1500));
+    await act(async () => Promise.resolve());
+    expect(dispatchCommand).toHaveBeenNthCalledWith(2, "mission.catalog.select", { catalog_id: "inspection-development" });
+    expect(screen.getByText("Selection accepted. Active catalog remains the current mission status until the runtime reports it.")).toBeInTheDocument();
+    expect(screen.getAllByText("inspection-production", { selector: "dd" }).length).toBeGreaterThan(0);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Restore profile default" }));
+    act(() => vi.advanceTimersByTime(1500));
+    await act(async () => Promise.resolve());
+    expect(dispatchCommand).toHaveBeenNthCalledWith(3, "mission.catalog.select", { default: true });
+  });
+
+  it("reports a rejected catalog refresh without inventing selectable missions", async () => {
+    const dispatchCommand = vi.fn().mockResolvedValue({
+      request_id: "catalog-list-rejected",
+      command_id: "mission.catalog.list",
+      accepted: false,
+      message: "installed mission catalog is not initialized",
+    });
+    render(<MissionPage state={readyState()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getAllByText("installed mission catalog is not initialized").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Pending mission selection")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apply selected mission" })).toBeDisabled();
+  });
+
+  it("keeps catalog selection pending and reports a rejected selection", async () => {
+    const dispatchCommand = vi.fn()
+      .mockResolvedValueOnce({
+        request_id: "catalog-list-3",
+        command_id: "mission.catalog.list",
+        accepted: true,
+        result: {
+          catalog: {
+            schema: "iii.mission-catalog/v1",
+            active_profile: "sim",
+            entries: [
+              { id: "inspection-production", classification: "production", profiles: ["sim"], available: true },
+              { id: "inspection-development", classification: "experimental", profiles: ["sim"], available: true },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        request_id: "catalog-select-rejected",
+        command_id: "mission.catalog.select",
+        accepted: false,
+        message: "mission selection is not maintenance-safe: vehicle is not confirmed disarmed",
+      });
+    render(<MissionPage state={readyState()} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+    fireEvent.change(screen.getByLabelText("Pending mission selection"), { target: { value: "inspection-development" } });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Apply selected mission" }));
+    act(() => vi.advanceTimersByTime(1500));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getAllByText("mission selection is not maintenance-safe: vehicle is not confirmed disarmed").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Pending mission selection")).toHaveValue("inspection-development");
+    expect(screen.getAllByText("inspection-production", { selector: "dd" }).length).toBeGreaterThan(0);
+  });
+
+  it("requires the non-simulation catalog safety gate for HIL and preserves simulation parity", async () => {
+    const hilState = readyState();
+    hilState.domains.mission!.specification = { ...hilState.domains.mission!.specification!, active_profile: "hil" };
+    hilState.domains.vehicle = { ...hilState.domains.vehicle!, nav_state: "mission", armed: true, in_air: true };
+    const catalogResponse = {
+      request_id: "catalog-list-4",
+      command_id: "mission.catalog.list",
+      accepted: true,
+      result: {
+        catalog: {
+          schema: "iii.mission-catalog/v1",
+          active_profile: "hil",
+          entries: [{ id: "inspection-production", classification: "production", profiles: ["hil"], available: true }],
+        },
+      },
+    };
+    const hilDispatch = vi.fn().mockResolvedValue(catalogResponse);
+    const hil = render(<MissionPage state={hilState} dispatchCommand={hilDispatch} />);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getByRole("button", { name: "Apply selected mission" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restore profile default" })).toBeDisabled();
+    expect(screen.getAllByText("Vehicle is not confirmed disarmed.").length).toBeGreaterThan(0);
+
+    hil.unmount();
+    const simDispatch = vi.fn().mockResolvedValue({
+      ...catalogResponse,
+      result: {
+        catalog: {
+          ...catalogResponse.result.catalog,
+          active_profile: "sim",
+          entries: [{ id: "inspection-production", classification: "production", profiles: ["sim"], available: true }],
+        },
+      },
+    });
+    render(<MissionPage state={readyState()} dispatchCommand={simDispatch} />);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh missions" }));
+    await act(async () => Promise.resolve());
+
+    expect(screen.getByRole("button", { name: "Apply selected mission" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Restore profile default" })).toBeEnabled();
+  });
+  it("starts the active catalog's reported root instead of a hard-coded inspection mode", () => {
+    const state = readyState();
+    state.domains.mission!.latest = { owned_mode: "reach_cable" };
+    state.domains.mission!.modes = [{ mode_key: "reach_cable", display_name: "Reach Cable", mode_id: 24, registered: true, active: false, tree_running: false, tree_finished: false, freshness: "fresh" }];
+    state.domains.mission!.inspection_start_eligibility = undefined;
+    const dispatchCommand = vi.fn().mockResolvedValue({ accepted: true });
+    render(<MissionPage state={state} dispatchCommand={dispatchCommand} />);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Start Reach Cable" }));
+    act(() => vi.advanceTimersByTime(1500));
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.activate", { mode_key: "reach_cable" });
+  });
+
+  it("requires reported ownership and fresh onboard activation permissions", () => {
+    const state = readyState();
+    state.domains.mission!.latest = {};
+    const { rerender } = render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Start Mission" })).toBeDisabled();
+    state.domains.mission!.latest = { owned_mode: "inspection_demo" };
+    state.domains.control!.latest = {};
+    rerender(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Start Inspection" })).toBeDisabled();
+  });
+
+  it("replaces inspection preparation, charging and cable intents in a profile without them", () => {
+    const state = readyState();
+    state.domains.system!.capabilities = {
+      profile: "opti_track",
+      payload_available: false,
+      perception_available: false,
+      overviews_available: false,
+      cable_intents_available: false,
+      custom_operations: ["fly_to_position", "hover"],
+    };
+    state.domains.mission!.latest = { owned_mode: "opti_track_flight" };
+    state.domains.mission!.mission_state = "active";
+    state.domains.mission!.modes = [{ mode_key: "opti_track_flight", display_name: "OptiTrack Flight", mode_id: 30, registered: true, active: true, tree_running: true, tree_finished: false, freshness: "fresh" }];
+    state.domains.mission!.preflight = {
+      ready: false,
+      items: [{ key: "vision_fusion", label: "PX4 external-vision fusion", passed: false, hard_gate: true, source: "PX4 EstimatorStatusFlags", detail: "position fused, height not fused, yaw fused (fresh)" }],
+    };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getAllByRole("note").map((note) => note.textContent)).toEqual([
+      "Overview capture is not available in the opti_track profile. The onboard preflight checks positioning instead.",
+      "Cable intent control is not available in the opti_track profile.",
+    ]);
+    expect(screen.queryByText(/Powerline overview/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Endpoint 1/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Charger")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Recharge now" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("PX4 external-vision fusion").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Battery" })).toBeInTheDocument();
+  });
+
+  it("offers Proceed only while the OptiTrack cycle waits in its takeoff mode", () => {
+    const state = readyState();
+    state.domains.system!.capabilities = { profile: "opti_track", cable_intents_available: false, overviews_available: false };
+    state.domains.mission!.latest = { owned_mode: "ot_cycle_takeoff" };
+    state.domains.mission!.mission_state = "active";
+    state.domains.mission!.modes = [
+      { mode_key: "ot_cycle_takeoff", display_name: "OT Takeoff", mode_id: 30, registered: true, active: true, tree_running: true, tree_finished: false, freshness: "fresh" },
+      { mode_key: "ot_cycle_shuttle", display_name: "OT Shuttle", mode_id: 31, registered: true, active: false, tree_running: false, tree_finished: false, freshness: "fresh" },
+    ];
+    state.domains.mission!.intents = [{
+      intent_key: "opti_track.proceed",
+      label: "Proceed",
+      service_name: "/mission/opti_track/proceed",
+      flag_name: "opti_track.proceed",
+      value: false,
+      sequence_id: 0,
+      lifecycle: "cleared",
+    }];
+    const dispatchCommand = vi.fn().mockResolvedValue({ accepted: true, request_id: "proceed-1", command_id: "mission.proceed" });
+    const view = render(<MissionPage state={state} dispatchCommand={dispatchCommand} />);
+
+    expect(screen.getByText("Cable intent control is not available in the opti_track profile.")).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Proceed" }));
+    act(() => vi.advanceTimersByTime(1500));
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.proceed", { value: true });
+
+    state.domains.mission!.modes = state.domains.mission!.modes!.map((mode) => ({
+      ...mode,
+      active: mode.mode_key === "ot_cycle_shuttle",
+      tree_running: mode.mode_key === "ot_cycle_shuttle",
+    }));
+    view.rerender(<MissionPage state={{ ...state }} dispatchCommand={dispatchCommand} />);
+    expect(screen.queryByRole("button", { name: "Proceed" })).not.toBeInTheDocument();
+  });
+
+  it("arms and starts an OptiTrack mission from the ground when the runtime allows it", () => {
+    const state = optiTrackOnGround();
+    const dispatchCommand = vi.fn().mockResolvedValue({ accepted: true, request_id: "start-1", command_id: "mission.activate" });
+    render(<MissionPage state={state} dispatchCommand={dispatchCommand} />);
+
+    const start = screen.getByRole("button", { name: "Arm and start OT Takeoff" });
+    expect(start).toBeEnabled();
+    fireEvent.pointerDown(start);
+    act(() => vi.advanceTimersByTime(1500));
+
+    expect(dispatchCommand).toHaveBeenCalledWith("mission.activate", { mode_key: "ot_cycle_takeoff" });
+  });
+
+  it("keeps the runtime's reason when an OptiTrack mode must start airborne", () => {
+    const state = optiTrackOnGround();
+    state.domains.control!.latest = {
+      command_permissions: { "mission.activate": ["mission activation requires the vehicle to be armed", "mission activation requires the vehicle to be in flight"] },
+    };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    const start = screen.getByRole("button", { name: "Start OT Takeoff" });
+    expect(start).toBeDisabled();
+    expect(start).toHaveAccessibleDescription("mission activation requires the vehicle to be armed");
+  });
+
+  it("blocks an OptiTrack ground start on a failed onboard preflight item", () => {
+    const state = optiTrackOnGround();
+    state.domains.mission!.preflight = {
+      ready: false,
+      items: [{ key: "ready_to_arm", label: "Aircraft ready to arm", passed: false, hard_gate: true, source: "PX4 fused safety state", detail: "PX4 arming checks have not passed" }],
+    };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start OT Takeoff" })).toHaveAccessibleDescription(
+      "Aircraft ready to arm: PX4 arming checks have not passed",
+    );
+  });
+
+  it("still requires an armed, airborne aircraft where missions cannot arm it", () => {
+    const state = optiTrackOnGround();
+    state.domains.system!.capabilities = { profile: "real", disarmed_mission_activation: false };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start OT Takeoff" })).toHaveAccessibleDescription(
+      "Aircraft must be armed and airborne; position it with RC or QGroundControl.",
+    );
+  });
+
+  it("starts the aircraft system with the runtime's own profile", () => {
+    const state = readyState();
+    state.domains.system = { booted: false, active: false, freshness: "fresh", latest: {}, capabilities: { profile: "opti_track" } };
+    const dispatchCommand = vi.fn().mockResolvedValue({ accepted: true, request_id: "start-1", command_id: "runtime.system_start" });
+    render(<MissionPage state={state} dispatchCommand={dispatchCommand} />);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Start III System" }));
+    act(() => vi.advanceTimersByTime(1500));
+
+    expect(dispatchCommand).toHaveBeenCalledWith("runtime.system_start", { profile: "opti_track" });
+  });
+
+  it("starts an inspection-named root without overview checks when the profile has no overviews", () => {
+    const state = readyState();
+    state.domains.system!.capabilities = { profile: "opti_track", overviews_available: false };
+    state.domains.powerline!.stored_overview_valid = false;
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start Inspection" })).toBeEnabled();
+  });
+
+  it("keeps a selected mission blocked by an onboard activation rejection", () => {
+    const state = readyState();
+    state.domains.control!.latest = { command_permissions: { "mission.activate": ["PX4 mode is not selectable"] } };
+    render(<MissionPage state={state} dispatchCommand={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Start Inspection" })).toBeDisabled();
+    expect(screen.getAllByText("PX4 mode is not selectable").length).toBeGreaterThan(0);
+  });
+
 });

@@ -205,7 +205,17 @@ function mergeCommandResults(
 
 function applyPatch(state: RuntimeStoreState, patch: OperatorStatePatch): RuntimeStoreState {
   const patchState = patch.domain === "map" ? mapFromDomainState(patch.state) : patch.state;
-  return {
+  const currentRevision = patch.domain === "configuration" ? configurationRevision(state.domains.configuration) : null;
+  const nextRevision = patch.domain === "configuration" ? configurationRevision(patchState as ConfigurationDomainState) : null;
+  if (
+    currentRevision &&
+    nextRevision &&
+    currentRevision.sessionId === nextRevision.sessionId &&
+    nextRevision.revision < currentRevision.revision
+  ) {
+    return state;
+  }
+  const nextState = {
     ...state,
     generated_at: patch.generated_at ?? state.generated_at,
     domains: {
@@ -213,6 +223,41 @@ function applyPatch(state: RuntimeStoreState, patch: OperatorStatePatch): Runtim
       [patch.domain]: patchState,
     },
   };
+  if (
+    currentRevision &&
+    nextRevision &&
+    currentRevision.sessionId === nextRevision.sessionId &&
+    nextRevision.revision > currentRevision.revision + 1
+  ) {
+    return appendEvent(
+      nextState,
+      labelEvent(
+        {
+          event_id: `configuration-gap-${patch.patch_id ?? `${nextRevision.sessionId}-${nextRevision.revision}`}`,
+          source: "frontend",
+          category: "configuration_state_rehydrated",
+          severity: "warning",
+          message: `Configuration revisions ${currentRevision.revision + 1}-${nextRevision.revision - 1} were missed; the full authoritative domain patch rehydrated revision ${nextRevision.revision}.`,
+          domain: "configuration",
+          details: {
+            session_id: nextRevision.sessionId,
+            previous_revision: currentRevision.revision,
+            authoritative_revision: nextRevision.revision,
+          },
+          timestamp: patch.generated_at,
+        },
+        "local",
+      ),
+    );
+  }
+  return nextState;
+}
+
+function configurationRevision(value: ConfigurationDomainState | undefined): { sessionId: string; revision: number } | null {
+  const latest = value?.latest as { manifest?: { status?: { tuning_session_id?: unknown; tuning_revision?: unknown } } } | undefined;
+  const sessionId = latest?.manifest?.status?.tuning_session_id;
+  const revision = latest?.manifest?.status?.tuning_revision;
+  return typeof sessionId === "string" && typeof revision === "number" ? { sessionId, revision } : null;
 }
 
 function appendEvent(state: RuntimeStoreState, event: LabelledEvent): RuntimeStoreState {

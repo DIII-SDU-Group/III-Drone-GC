@@ -54,7 +54,7 @@ describe("LogsPage", () => {
   it("is login-gated", () => {
     render(<LogsPage state={state(false)} authenticated={false} />);
 
-    expect(screen.getByText("Login required to access runtime logs.")).toBeInTheDocument();
+    expect(screen.getByText("Connect to a runtime to access its logs.")).toBeInTheDocument();
   });
 
   it("loads sources and REST history", async () => {

@@ -78,6 +78,42 @@ describe("runtimeStoreReducer", () => {
     expect(state.generated_at).toBe("2026-05-27T18:00:05Z");
   });
 
+  it("ignores stale configuration patches and rehydrates a detected revision gap from a full patch", () => {
+    const base = snapshot();
+    base.configuration = {
+      active_snapshot_id: "snapshot-3",
+      latest: { manifest: { status: { tuning_session_id: "a".repeat(64), tuning_revision: 3 }, available_snapshots: [] } },
+    };
+    const initialized = runtimeStoreReducer(initialRuntimeStoreState, { type: "snapshot", snapshot: base });
+    const rehydrated = runtimeStoreReducer(initialized, {
+      type: "patch",
+      patch: {
+        domain: "configuration",
+        patch_id: "configuration-revision-5",
+        generated_at: "2026-05-27T18:00:05Z",
+        state: {
+          active_snapshot_id: "snapshot-5",
+          latest: { manifest: { status: { tuning_session_id: "a".repeat(64), tuning_revision: 5 }, available_snapshots: [{ snapshot_id: "snapshot-5", label: "five" }] } },
+        },
+      },
+    });
+    const stale = runtimeStoreReducer(rehydrated, {
+      type: "patch",
+      patch: {
+        domain: "configuration",
+        patch_id: "configuration-stale-4",
+        state: {
+          active_snapshot_id: "snapshot-4",
+          latest: { manifest: { status: { tuning_session_id: "a".repeat(64), tuning_revision: 4 } } },
+        },
+      },
+    });
+
+    expect(rehydrated.domains.configuration?.active_snapshot_id).toBe("snapshot-5");
+    expect(rehydrated.events.at(-1)).toEqual(expect.objectContaining({ category: "configuration_state_rehydrated" }));
+    expect(stale.domains.configuration?.active_snapshot_id).toBe("snapshot-5");
+  });
+
   it("labels runtime and local events by transport source", () => {
     const runtimeEvent: OperatorEvent = {
       event_id: "runtime-event-2",
